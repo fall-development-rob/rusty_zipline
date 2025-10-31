@@ -1,0 +1,61 @@
+[package]
+name = "rusty_zipline"
+version = "0.1.0"
+edition = "2025"
+authors = ["Robert Fall"]
+description = "A Rust implementation of Zipline - Pythonic event-driven backtesting library"
+license = "Apache-2.0"
+repository = "https://github.com/fall-development-rob/rusty_zipline"
+keywords = ["trading", "backtesting", "finance", "algorithmic-trading"]
+categories = ["finance", "simulation"]
+
+[dependencies]
+# Data handling
+polars = { version = "0.38", features = ["lazy", "temporal", "dtype-datetime"] }
+arrow = "51.0"
+
+# Date and time
+chrono = "0.4"
+chrono-tz = "0.8"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async runtime (for potential data sources)
+tokio = { version = "1.36", features = ["full"], optional = true }
+
+# Numerical computations
+num-traits = "0.2"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# UUID for order IDs
+uuid = { version = "1.7", features = ["v4", "serde"] }
+
+# HashMap optimization
+hashbrown = "0.14"
+
+[dev-dependencies]
+proptest = "1.4"
+criterion = "0.5"
+approx = "0.5"
+
+[features]
+default = []
+async = ["tokio"]
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
