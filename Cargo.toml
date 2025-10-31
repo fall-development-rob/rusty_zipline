@@ -11,7 +11,7 @@ categories = ["finance", "simulation"]
 
 [dependencies]
 # Data handling
-polars = { version = "0.38", features = ["lazy", "temporal", "dtype-datetime"] }
+polars = { version = "0.38", features = ["lazy", "temporal", "dtype-datetime", "csv", "parquet"] }
 arrow = "51.0"
 
 # Date and time
@@ -21,16 +21,22 @@ chrono-tz = "0.8"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+csv = "1.3"
 
 # Error handling
 thiserror = "1.0"
 anyhow = "1.0"
+
+# Database (for asset management)
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls", "chrono", "uuid"], optional = true }
+rusqlite = { version = "0.31", features = ["bundled", "chrono", "uuid"], optional = true }
 
 # Async runtime (for potential data sources)
 tokio = { version = "1.36", features = ["full"], optional = true }
 
 # Numerical computations
 num-traits = "0.2"
+statrs = "0.16"  # Statistical functions for metrics
 
 # Logging
 log = "0.4"
@@ -42,14 +48,23 @@ uuid = { version = "1.7", features = ["v4", "serde"] }
 # HashMap optimization
 hashbrown = "0.14"
 
+# Concurrency
+rayon = "1.8"  # Parallel iterators
+
+# CLI (for bundle management)
+clap = { version = "4.5", features = ["derive"], optional = true }
+
 [dev-dependencies]
 proptest = "1.4"
 criterion = "0.5"
 approx = "0.5"
 
 [features]
-default = []
+default = ["rusqlite"]
 async = ["tokio"]
+sqlx-support = ["sqlx", "tokio"]
+cli = ["clap"]
+full = ["async", "sqlx-support", "cli"]
 
 [[bench]]
 name = "benchmarks"

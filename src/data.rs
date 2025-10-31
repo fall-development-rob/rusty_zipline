@@ -1,5 +1,7 @@
 //! Market data handling
 
+pub mod adjustments;
+
 use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};
 use crate::types::{Bar, Price, Timestamp};
