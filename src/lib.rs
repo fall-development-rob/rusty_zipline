@@ -27,6 +27,7 @@
 
 pub mod algorithm;
 pub mod asset;
+pub mod assets; // New: Asset database and management
 pub mod calendar;
 pub mod data;
 pub mod engine;
@@ -36,6 +37,7 @@ pub mod finance;
 pub mod order;
 pub mod performance;
 pub mod pipeline;
+pub mod schedule;
 pub mod types;
 
 pub mod prelude {

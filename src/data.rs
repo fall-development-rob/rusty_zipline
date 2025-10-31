@@ -1,6 +1,7 @@
 //! Market data handling
 
 pub mod adjustments;
+pub mod bundle;
 
 use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};

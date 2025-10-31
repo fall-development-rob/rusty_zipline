@@ -98,6 +98,82 @@ impl Context {
     pub fn pending_orders_count(&self) -> usize {
         self.pending_orders.len()
     }
+
+    /// Order a percentage of current portfolio value
+    ///
+    /// # Arguments
+    /// * `asset` - Asset to trade
+    /// * `percent` - Percentage of portfolio value (0.1 = 10%)
+    /// * `price` - Current price for conversion to shares
+    pub fn order_percent(&mut self, asset: Asset, percent: f64, price: f64) -> Result<OrderId> {
+        let target_value = self.portfolio.portfolio_value * percent;
+        let quantity = target_value / price;
+        self.order(asset, quantity)
+    }
+
+    /// Order to target a specific percentage of portfolio
+    ///
+    /// # Arguments
+    /// * `asset` - Asset to trade
+    /// * `target_percent` - Target percentage of portfolio (0.1 = 10%)
+    /// * `price` - Current price for conversion to shares
+    pub fn order_target_percent(&mut self, asset: Asset, target_percent: f64, price: f64) -> Result<OrderId> {
+        let target_value = self.portfolio.portfolio_value * target_percent;
+        let target_quantity = target_value / price;
+        self.order_target(asset, target_quantity)
+    }
+
+    /// Order a specific dollar value
+    ///
+    /// # Arguments
+    /// * `asset` - Asset to trade
+    /// * `value` - Dollar value to trade
+    /// * `price` - Current price for conversion to shares
+    pub fn order_value(&mut self, asset: Asset, value: f64, price: f64) -> Result<OrderId> {
+        let quantity = value / price;
+        self.order(asset, quantity)
+    }
+
+    /// Order to target a specific dollar value position
+    ///
+    /// # Arguments
+    /// * `asset` - Asset to trade
+    /// * `target_value` - Target dollar value of position
+    /// * `price` - Current price for conversion to shares
+    pub fn order_target_value(&mut self, asset: Asset, target_value: f64, price: f64) -> Result<OrderId> {
+        let target_quantity = target_value / price;
+        self.order_target(asset, target_quantity)
+    }
+
+    /// Get an order by ID
+    pub fn get_order(&self, order_id: OrderId) -> Option<&Order> {
+        self.pending_orders.iter().find(|o| o.id == order_id)
+    }
+
+    /// Get all open orders, optionally filtered by asset
+    pub fn get_open_orders(&self, asset: Option<&Asset>) -> Vec<&Order> {
+        match asset {
+            Some(a) => self
+                .pending_orders
+                .iter()
+                .filter(|o| o.asset.id == a.id)
+                .collect(),
+            None => self.pending_orders.iter().collect(),
+        }
+    }
+
+    /// Cancel a pending order
+    pub fn cancel_order(&mut self, order_id: OrderId) -> Result<()> {
+        if let Some(pos) = self.pending_orders.iter().position(|o| o.id == order_id) {
+            let mut order = self.pending_orders.remove(pos);
+            order.cancel(self.timestamp);
+            Ok(())
+        } else {
+            Err(crate::error::ZiplineError::InvalidOrder(
+                "Order not found or already closed".to_string(),
+            ))
+        }
+    }
 }
 
 use uuid::Uuid;

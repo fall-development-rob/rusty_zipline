@@ -58,6 +58,7 @@ clap = { version = "4.5", features = ["derive"], optional = true }
 proptest = "1.4"
 criterion = "0.5"
 approx = "0.5"
+tempfile = "3.10"
 
 [features]
 default = ["rusqlite"]
