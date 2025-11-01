@@ -110,6 +110,53 @@ impl Order {
         }
     }
 
+    /// Create a new stop order
+    pub fn stop(
+        asset: Asset,
+        side: OrderSide,
+        quantity: Quantity,
+        stop_price: Price,
+        timestamp: Timestamp,
+    ) -> Self {
+        Self {
+            id: OrderId::new_v4(),
+            asset,
+            side,
+            order_type: OrderType::Stop,
+            quantity,
+            filled: 0.0,
+            limit_price: None,
+            stop_price: Some(stop_price),
+            status: OrderStatus::Created,
+            created_at: timestamp,
+            updated_at: timestamp,
+        }
+    }
+
+    /// Create a new stop-limit order
+    pub fn stop_limit(
+        asset: Asset,
+        side: OrderSide,
+        quantity: Quantity,
+        stop_price: Price,
+        limit_price: Price,
+        timestamp: Timestamp,
+    ) -> Self {
+        Self {
+            id: OrderId::new_v4(),
+            asset,
+            side,
+            order_type: OrderType::StopLimit,
+            quantity,
+            filled: 0.0,
+            limit_price: Some(limit_price),
+            stop_price: Some(stop_price),
+            status: OrderStatus::Created,
+            created_at: timestamp,
+            updated_at: timestamp,
+        }
+    }
+
     /// Get remaining quantity to fill
     pub fn remaining(&self) -> Quantity {
         self.quantity - self.filled
