@@ -397,6 +397,173 @@ impl Default for ControlManager {
     }
 }
 
+/// Limit exposure to specific sectors
+pub struct SectorExposure {
+    /// Maximum percentage of portfolio per sector
+    max_sector_exposure: f64,
+    /// Map of asset ID to sector
+    asset_sectors: std::collections::HashMap<u64, String>,
+}
+
+impl SectorExposure {
+    pub fn new(max_sector_exposure: f64) -> Self {
+        Self {
+            max_sector_exposure,
+            asset_sectors: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Register an asset's sector
+    pub fn register_asset(&mut self, asset_id: u64, sector: String) {
+        self.asset_sectors.insert(asset_id, sector);
+    }
+
+    /// Get sector for an asset
+    pub fn get_sector(&self, asset_id: u64) -> Option<&str> {
+        self.asset_sectors.get(&asset_id).map(|s| s.as_str())
+    }
+
+    /// Calculate current sector exposures
+    pub fn calculate_exposures(&self, context: &Context) -> std::collections::HashMap<String, f64> {
+        let mut sector_values: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+
+        for position in context.portfolio.positions.values() {
+            if let Some(sector) = self.asset_sectors.get(&position.asset_id) {
+                let value = position.quantity * position.cost_basis; // Approximation
+                *sector_values.entry(sector.clone()).or_insert(0.0) += value;
+            }
+        }
+
+        // Convert to percentages
+        let portfolio_value = context.portfolio.portfolio_value;
+        sector_values
+            .into_iter()
+            .map(|(sector, value)| (sector, value / portfolio_value))
+            .collect()
+    }
+}
+
+impl TradingControl for SectorExposure {
+    fn validate_order(&self, order: &Order, context: &Context) -> Result<()> {
+        if let Some(sector) = self.get_sector(order.asset.id) {
+            let exposures = self.calculate_exposures(context);
+            let current_exposure = exposures.get(sector).copied().unwrap_or(0.0);
+
+            // Estimate new exposure (simplified)
+            let order_value = order.quantity * 100.0; // Placeholder price
+            let new_exposure = current_exposure + (order_value / context.portfolio.portfolio_value);
+
+            if new_exposure > self.max_sector_exposure {
+                return Err(ZiplineError::InvalidOrder(format!(
+                    "Order would increase {} sector exposure to {:.1}%, exceeding maximum of {:.1}%",
+                    sector,
+                    new_exposure * 100.0,
+                    self.max_sector_exposure * 100.0
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "SectorExposure"
+    }
+}
+
+/// Limit trading based on asset volatility
+pub struct VolatilityLimit {
+    /// Maximum allowed volatility (annualized)
+    max_volatility: f64,
+    /// Volatility values for assets
+    asset_volatilities: std::collections::HashMap<u64, f64>,
+}
+
+impl VolatilityLimit {
+    pub fn new(max_volatility: f64) -> Self {
+        Self {
+            max_volatility,
+            asset_volatilities: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Update volatility for an asset
+    pub fn update_volatility(&mut self, asset_id: u64, volatility: f64) {
+        self.asset_volatilities.insert(asset_id, volatility);
+    }
+
+    /// Get volatility for an asset
+    pub fn get_volatility(&self, asset_id: u64) -> Option<f64> {
+        self.asset_volatilities.get(&asset_id).copied()
+    }
+}
+
+impl TradingControl for VolatilityLimit {
+    fn validate_order(&self, order: &Order, _context: &Context) -> Result<()> {
+        if let Some(volatility) = self.get_volatility(order.asset.id) {
+            if volatility > self.max_volatility {
+                return Err(ZiplineError::InvalidOrder(format!(
+                    "Asset {} has volatility {:.2}%, exceeding maximum of {:.2}%",
+                    order.asset.symbol,
+                    volatility * 100.0,
+                    self.max_volatility * 100.0
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "VolatilityLimit"
+    }
+}
+
+/// Position concentration limit
+pub struct PositionConcentration {
+    /// Maximum percentage of portfolio in single position
+    max_concentration: f64,
+}
+
+impl PositionConcentration {
+    pub fn new(max_concentration: f64) -> Self {
+        Self { max_concentration }
+    }
+}
+
+impl TradingControl for PositionConcentration {
+    fn validate_order(&self, order: &Order, context: &Context) -> Result<()> {
+        let current_position = context
+            .portfolio
+            .get_position(order.asset.id)
+            .map(|p| p.quantity * p.cost_basis)
+            .unwrap_or(0.0);
+
+        // Estimate new position value
+        let order_value = order.quantity * 100.0; // Placeholder
+        let new_position_value = match order.side {
+            crate::order::OrderSide::Buy => current_position + order_value,
+            crate::order::OrderSide::Sell => current_position - order_value,
+        };
+
+        let concentration = new_position_value / context.portfolio.portfolio_value;
+
+        if concentration > self.max_concentration {
+            return Err(ZiplineError::InvalidOrder(format!(
+                "Position would be {:.1}% of portfolio, exceeding concentration limit of {:.1}%",
+                concentration * 100.0,
+                self.max_concentration * 100.0
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "PositionConcentration"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,5 +631,54 @@ mod tests {
 
         assert!(manager.validate_order(&order, &context).is_ok());
         assert!(manager.validate_account(&context).is_ok());
+    }
+
+    #[test]
+    fn test_sector_exposure() {
+        let mut control = SectorExposure::new(0.30); // 30% max per sector
+        control.register_asset(1, "Technology".to_string());
+        control.register_asset(2, "Healthcare".to_string());
+
+        let context = Context::new(100000.0);
+        let tech_asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+
+        let order = Order::market(tech_asset, OrderSide::Buy, 100.0, Utc::now());
+        // Should pass for reasonable order
+        assert!(control.validate_order(&order, &context).is_ok());
+
+        assert_eq!(control.get_sector(1), Some("Technology"));
+        assert_eq!(control.get_sector(2), Some("Healthcare"));
+    }
+
+    #[test]
+    fn test_volatility_limit() {
+        let mut control = VolatilityLimit::new(0.50); // 50% max volatility
+        control.update_volatility(1, 0.30); // Low volatility
+        control.update_volatility(2, 0.60); // High volatility
+
+        let context = Context::new(100000.0);
+
+        let low_vol_asset = Asset::equity(1, "STABLE".to_string(), "NYSE".to_string());
+        let high_vol_asset = Asset::equity(2, "VOLATILE".to_string(), "NYSE".to_string());
+
+        let low_vol_order = Order::market(low_vol_asset, OrderSide::Buy, 100.0, Utc::now());
+        assert!(control.validate_order(&low_vol_order, &context).is_ok());
+
+        let high_vol_order = Order::market(high_vol_asset, OrderSide::Buy, 100.0, Utc::now());
+        assert!(control.validate_order(&high_vol_order, &context).is_err());
+
+        assert_eq!(control.get_volatility(1), Some(0.30));
+        assert_eq!(control.get_volatility(2), Some(0.60));
+    }
+
+    #[test]
+    fn test_position_concentration() {
+        let control = PositionConcentration::new(0.25); // 25% max concentration
+        let context = Context::new(100000.0);
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+
+        let order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
+        // Should validate concentration limits
+        assert!(control.validate_order(&order, &context).is_ok());
     }
 }

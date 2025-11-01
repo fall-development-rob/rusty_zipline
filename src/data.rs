@@ -1,10 +1,12 @@
 //! Market data handling
 
 pub mod adjustments;
+pub mod bar_reader; // NEW: P1 - Daily and minute bar readers
 pub mod bundle;
 pub mod data_portal; // NEW: Unified data access
 pub mod dispatch_reader;
 pub mod frequency;
+pub mod history_loader; // NEW: P1 - Historical window management
 pub mod minute_bars;
 
 use crate::asset::Asset;

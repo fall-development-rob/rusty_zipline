@@ -6,6 +6,7 @@ pub mod cancel_policy; // NEW: Order cancellation policies
 pub mod commission;
 pub mod constants; // NEW: Trading constants and defaults
 pub mod controls;
+pub mod ledger; // NEW: P1 - Transaction tracking and P&L system
 pub mod metrics;
 pub mod slippage;
 pub mod trading; // NEW: Trading controls and validations
@@ -28,8 +29,10 @@ pub use constants::{
 pub use controls::{
     AccountControl, ControlManager, LongOnly, MaxLeverage as ControlMaxLeverage, MaxOrderCount,
     MaxOrderSize as ControlMaxOrderSize, MaxPositionSize as ControlMaxPositionSize, MinLeverage,
-    RestrictedList, TradingControl as ControlTradingControl,
+    PositionConcentration, RestrictedList, SectorExposure, TradingControl as ControlTradingControl,
+    VolatilityLimit,
 };
+pub use ledger::{CostBasisMethod, Ledger, LedgerPosition, Lot, PnLSummary};
 pub use metrics::{MetricsTracker, PerformanceMetrics, Trade};
 pub use slippage::{
     FixedBasisPointsSlippage, LinearImpact, NoSlippage, SlippageModel, SquareRootImpact,

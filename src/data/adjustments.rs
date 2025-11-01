@@ -218,6 +218,28 @@ impl AdjustmentReader {
                         kind: DividendKind::Stock,
                     }
                 }
+                "merger" => {
+                    let ratio: f64 = record
+                        .get(3)
+                        .and_then(|s| s.parse().ok())
+                        .ok_or_else(|| ZiplineError::DataError("Missing merger ratio".into()))?;
+                    let target_asset_id: u64 = record
+                        .get(4)
+                        .and_then(|s| s.parse().ok())
+                        .ok_or_else(|| ZiplineError::DataError("Missing target asset ID".into()))?;
+                    AdjustmentKind::Merger { ratio, target_asset_id }
+                }
+                "spinoff" => {
+                    let ratio: f64 = record
+                        .get(3)
+                        .and_then(|s| s.parse().ok())
+                        .ok_or_else(|| ZiplineError::DataError("Missing spinoff ratio".into()))?;
+                    let new_asset_id: u64 = record
+                        .get(4)
+                        .and_then(|s| s.parse().ok())
+                        .ok_or_else(|| ZiplineError::DataError("Missing new asset ID".into()))?;
+                    AdjustmentKind::SpinOff { ratio, new_asset_id }
+                }
                 _ => continue,
             };
 
@@ -234,9 +256,215 @@ impl AdjustmentReader {
             .map(|adjs| adjs.len())
             .unwrap_or(0)
     }
+
+    /// Get all unique asset IDs that have adjustments
+    pub fn assets_with_adjustments(&self) -> Vec<u64> {
+        self.adjustments.keys().copied().collect()
+    }
+
+    /// Remove adjustments for an asset
+    pub fn remove_asset(&mut self, asset_id: u64) -> Option<Vec<Adjustment>> {
+        self.adjustments.remove(&asset_id)
+    }
+
+    /// Get all adjustments (for all assets)
+    pub fn all_adjustments(&self) -> Vec<&Adjustment> {
+        self.adjustments
+            .values()
+            .flat_map(|adjs| adjs.iter())
+            .collect()
+    }
+
+    /// Total adjustment count across all assets
+    pub fn total_adjustment_count(&self) -> usize {
+        self.adjustments
+            .values()
+            .map(|adjs| adjs.len())
+            .sum()
+    }
 }
 
 impl Default for AdjustmentReader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Writer for adjustment data
+pub struct AdjustmentWriter {
+    /// Adjustments to write
+    adjustments: Vec<Adjustment>,
+}
+
+impl AdjustmentWriter {
+    /// Create new adjustment writer
+    pub fn new() -> Self {
+        Self {
+            adjustments: Vec::new(),
+        }
+    }
+
+    /// Add adjustment to write
+    pub fn add(&mut self, adjustment: Adjustment) {
+        self.adjustments.push(adjustment);
+    }
+
+    /// Add multiple adjustments
+    pub fn add_many(&mut self, adjustments: Vec<Adjustment>) {
+        self.adjustments.extend(adjustments);
+    }
+
+    /// Write adjustments to CSV file
+    /// CSV format: asset_id,date,type,value1,value2
+    pub fn write_to_csv(&self, path: &Path) -> Result<()> {
+        let mut writer = csv::Writer::from_path(path)
+            .map_err(|e| ZiplineError::DataError(format!("Failed to create CSV: {}", e)))?;
+
+        // Write header
+        writer
+            .write_record(&["asset_id", "date", "type", "value1", "value2"])
+            .map_err(|e| ZiplineError::DataError(format!("Failed to write header: {}", e)))?;
+
+        // Write adjustments
+        for adj in &self.adjustments {
+            let date_str = adj.effective_date.to_rfc3339();
+
+            match &adj.kind {
+                AdjustmentKind::Split { ratio } => {
+                    writer
+                        .write_record(&[
+                            adj.asset_id.to_string(),
+                            date_str,
+                            "split".to_string(),
+                            ratio.to_string(),
+                            "".to_string(),
+                        ])
+                        .map_err(|e| ZiplineError::DataError(format!("Failed to write split: {}", e)))?;
+                }
+                AdjustmentKind::Dividend { amount, kind } => {
+                    let type_str = match kind {
+                        DividendKind::Cash => "dividend_cash",
+                        DividendKind::Stock => "dividend_stock",
+                    };
+                    writer
+                        .write_record(&[
+                            adj.asset_id.to_string(),
+                            date_str,
+                            type_str.to_string(),
+                            amount.to_string(),
+                            "".to_string(),
+                        ])
+                        .map_err(|e| ZiplineError::DataError(format!("Failed to write dividend: {}", e)))?;
+                }
+                AdjustmentKind::Merger { ratio, target_asset_id } => {
+                    writer
+                        .write_record(&[
+                            adj.asset_id.to_string(),
+                            date_str,
+                            "merger".to_string(),
+                            ratio.to_string(),
+                            target_asset_id.to_string(),
+                        ])
+                        .map_err(|e| ZiplineError::DataError(format!("Failed to write merger: {}", e)))?;
+                }
+                AdjustmentKind::SpinOff { ratio, new_asset_id } => {
+                    writer
+                        .write_record(&[
+                            adj.asset_id.to_string(),
+                            date_str,
+                            "spinoff".to_string(),
+                            ratio.to_string(),
+                            new_asset_id.to_string(),
+                        ])
+                        .map_err(|e| ZiplineError::DataError(format!("Failed to write spinoff: {}", e)))?;
+                }
+            }
+        }
+
+        writer
+            .flush()
+            .map_err(|e| ZiplineError::DataError(format!("Failed to flush CSV: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Get count of pending adjustments
+    pub fn count(&self) -> usize {
+        self.adjustments.len()
+    }
+
+    /// Clear all pending adjustments
+    pub fn clear(&mut self) {
+        self.adjustments.clear();
+    }
+}
+
+impl Default for AdjustmentWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Combined adjustment manager (reader + writer)
+pub struct AdjustmentManager {
+    reader: AdjustmentReader,
+    writer: AdjustmentWriter,
+}
+
+impl AdjustmentManager {
+    /// Create new adjustment manager
+    pub fn new() -> Self {
+        Self {
+            reader: AdjustmentReader::new(),
+            writer: AdjustmentWriter::new(),
+        }
+    }
+
+    /// Get reader
+    pub fn reader(&self) -> &AdjustmentReader {
+        &self.reader
+    }
+
+    /// Get mutable reader
+    pub fn reader_mut(&mut self) -> &mut AdjustmentReader {
+        &mut self.reader
+    }
+
+    /// Get writer
+    pub fn writer(&self) -> &AdjustmentWriter {
+        &self.writer
+    }
+
+    /// Get mutable writer
+    pub fn writer_mut(&mut self) -> &mut AdjustmentWriter {
+        &mut self.writer
+    }
+
+    /// Load adjustments from CSV into reader
+    pub fn load(&mut self, path: &Path) -> Result<()> {
+        self.reader.load_from_csv(path)
+    }
+
+    /// Save pending adjustments from writer to CSV
+    pub fn save(&self, path: &Path) -> Result<()> {
+        self.writer.write_to_csv(path)
+    }
+
+    /// Add adjustment (goes to writer)
+    pub fn add_adjustment(&mut self, adjustment: Adjustment) {
+        self.writer.add(adjustment);
+    }
+
+    /// Commit pending adjustments from writer to reader
+    pub fn commit(&mut self) {
+        for adj in self.writer.adjustments.iter().cloned() {
+            self.reader.add_adjustment(adj);
+        }
+        self.writer.clear();
+    }
+}
+
+impl Default for AdjustmentManager {
     fn default() -> Self {
         Self::new()
     }

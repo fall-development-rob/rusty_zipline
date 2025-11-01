@@ -113,6 +113,74 @@ impl BundleData {
             end_date: self.end_date,
         }
     }
+
+    /// Merge another bundle into this one (for incremental updates)
+    pub fn merge(&mut self, other: BundleData) -> Result<()> {
+        // Merge assets
+        for (symbol, asset) in other.assets {
+            if !self.assets.contains_key(&symbol) {
+                self.assets.insert(symbol, asset);
+            }
+        }
+
+        // Merge bar data
+        for (asset_id, new_bars) in other.data {
+            let existing_bars = self.data.entry(asset_id).or_insert_with(Vec::new);
+
+            // Add new bars
+            for bar in new_bars {
+                // Check if bar already exists (by timestamp)
+                let exists = existing_bars
+                    .iter()
+                    .any(|b| b.timestamp == bar.timestamp);
+
+                if !exists {
+                    existing_bars.push(bar);
+                    self.bar_count += 1;
+                }
+            }
+        }
+
+        // Re-finalize to update date ranges
+        self.finalize()?;
+
+        Ok(())
+    }
+
+    /// Remove bars before a specific date (cleanup old data)
+    pub fn remove_before(&mut self, cutoff_date: NaiveDate) -> usize {
+        let mut removed_count = 0;
+
+        for bars in self.data.values_mut() {
+            let original_len = bars.len();
+            bars.retain(|bar| bar.timestamp.date_naive() >= cutoff_date);
+            removed_count += original_len - bars.len();
+        }
+
+        self.bar_count -= removed_count;
+        removed_count
+    }
+
+    /// Remove bars after a specific date
+    pub fn remove_after(&mut self, cutoff_date: NaiveDate) -> usize {
+        let mut removed_count = 0;
+
+        for bars in self.data.values_mut() {
+            let original_len = bars.len();
+            bars.retain(|bar| bar.timestamp.date_naive() <= cutoff_date);
+            removed_count += original_len - bars.len();
+        }
+
+        self.bar_count -= removed_count;
+        removed_count
+    }
+
+    /// Get total size in memory (approximate, in bytes)
+    pub fn memory_size(&self) -> usize {
+        let bars_size = self.bar_count * std::mem::size_of::<Bar>();
+        let assets_size = self.assets.len() * std::mem::size_of::<Asset>();
+        bars_size + assets_size
+    }
 }
 
 impl Default for BundleData {
@@ -384,6 +452,54 @@ impl BundleRegistry {
     /// Clear all bundles
     pub fn clear(&mut self) {
         self.bundles.clear();
+    }
+
+    /// Unregister a bundle by name
+    pub fn unregister(&mut self, name: &str) -> Option<BundleData> {
+        self.bundles.remove(name)
+    }
+
+    /// Incrementally update a bundle with new data from CSV
+    pub fn update_bundle(&mut self, name: &str, path: &Path) -> Result<()> {
+        let mut reader = CSVBundleReader::new();
+        let new_data = reader.load_csv(path)?;
+
+        if let Some(existing) = self.bundles.get_mut(name) {
+            existing.merge(new_data)?;
+        } else {
+            self.register(name.to_string(), new_data);
+        }
+
+        Ok(())
+    }
+
+    /// Incrementally update bundle with custom format
+    pub fn update_bundle_with_format(
+        &mut self,
+        name: &str,
+        path: &Path,
+        format: CSVFormat,
+    ) -> Result<()> {
+        let mut reader = CSVBundleReader::with_format(format);
+        let new_data = reader.load_csv(path)?;
+
+        if let Some(existing) = self.bundles.get_mut(name) {
+            existing.merge(new_data)?;
+        } else {
+            self.register(name.to_string(), new_data);
+        }
+
+        Ok(())
+    }
+
+    /// Check if bundle exists
+    pub fn contains(&self, name: &str) -> bool {
+        self.bundles.contains_key(name)
+    }
+
+    /// Get number of bundles
+    pub fn bundle_count(&self) -> usize {
+        self.bundles.len()
     }
 }
 
