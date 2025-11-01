@@ -27,12 +27,12 @@
 
 pub mod algorithm;
 pub mod asset;
-pub mod assets; // New: Asset database and management
+pub mod assets; // Asset database and management
 pub mod calendar;
 pub mod data;
 pub mod engine;
 pub mod error;
-pub mod execution;
+pub mod execution; // Execution styles (Market, Limit, Stop orders)
 pub mod finance;
 pub mod order;
 pub mod performance;

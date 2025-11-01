@@ -284,6 +284,160 @@ impl Blotter {
         )
     }
 
+    /// Cancel all open orders (for cancel policy execution)
+    pub fn cancel_all_orders(&mut self, dt: DateTime<Utc>) -> Vec<OrderId> {
+        let order_ids: Vec<OrderId> = self.open_orders.keys().copied().collect();
+        let mut cancelled_ids = Vec::new();
+
+        for order_id in order_ids {
+            if self.cancel_order(order_id, dt).is_ok() {
+                cancelled_ids.push(order_id);
+            }
+        }
+
+        cancelled_ids
+    }
+
+    /// Execute cancel policy (e.g., cancel all orders at end of day)
+    pub fn execute_cancel_policy<F>(&mut self, dt: DateTime<Utc>, should_cancel: F) -> Vec<OrderId>
+    where
+        F: Fn(&Order) -> bool,
+    {
+        let to_cancel: Vec<OrderId> = self
+            .open_orders
+            .iter()
+            .filter(|(_, order)| should_cancel(order))
+            .map(|(id, _)| *id)
+            .collect();
+
+        let mut cancelled = Vec::new();
+        for order_id in to_cancel {
+            if self.cancel_order(order_id, dt).is_ok() {
+                cancelled.push(order_id);
+            }
+        }
+
+        cancelled
+    }
+
+    /// Process a stock split - adjust open orders
+    pub fn process_split(&mut self, asset_id: u64, ratio: f64) -> Result<usize> {
+        let mut adjusted_count = 0;
+
+        // Adjust all open orders for this asset
+        for order in self.open_orders.values_mut() {
+            if order.asset.id == asset_id {
+                order.amount *= ratio;
+                order.filled *= ratio;
+                adjusted_count += 1;
+            }
+        }
+
+        Ok(adjusted_count)
+    }
+
+    /// Process multiple splits at once
+    pub fn process_splits(&mut self, splits: &[(u64, f64)]) -> Result<usize> {
+        let mut total_adjusted = 0;
+
+        for (asset_id, ratio) in splits {
+            total_adjusted += self.process_split(*asset_id, *ratio)?;
+        }
+
+        Ok(total_adjusted)
+    }
+
+    /// Prune closed orders (move old filled/cancelled orders to archive)
+    pub fn prune_orders(&mut self, before: DateTime<Utc>) -> (usize, usize) {
+        let filled_pruned = self
+            .filled_orders
+            .iter()
+            .filter(|(_, order)| order.created < before)
+            .count();
+
+        let cancelled_pruned = self
+            .cancelled_orders
+            .iter()
+            .filter(|(_, order)| order.created < before)
+            .count();
+
+        // In a real implementation, these would be archived somewhere
+        // For now, we keep them all (no actual pruning to avoid data loss)
+
+        (filled_pruned, cancelled_pruned)
+    }
+
+    /// Get orders by status
+    pub fn get_orders_by_status(&self, status: OrderStatus) -> Vec<&Order> {
+        match status {
+            OrderStatus::Open => self.get_open_orders(),
+            OrderStatus::Filled => self.get_filled_orders(),
+            OrderStatus::Cancelled => self.get_cancelled_orders(),
+            OrderStatus::Rejected => self.rejected_orders.values().collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Check if there are any open orders
+    pub fn has_open_orders(&self) -> bool {
+        !self.open_orders.is_empty()
+    }
+
+    /// Check if there are open orders for a specific asset
+    pub fn has_open_orders_for_asset(&self, asset_id: u64) -> bool {
+        self.open_orders
+            .values()
+            .any(|o| o.asset.id == asset_id)
+    }
+
+    /// Get total number of orders (all statuses)
+    pub fn total_orders(&self) -> usize {
+        self.open_orders.len()
+            + self.filled_orders.len()
+            + self.cancelled_orders.len()
+            + self.rejected_orders.len()
+    }
+
+    /// Get total value of open orders
+    pub fn open_orders_value(&self) -> HashMap<u64, f64> {
+        let mut values = HashMap::new();
+
+        for order in self.open_orders.values() {
+            let entry = values.entry(order.asset.id).or_insert(0.0);
+            *entry += order.amount * order.limit_price.unwrap_or(0.0);
+        }
+
+        values
+    }
+
+    /// Cancel multiple orders at once
+    pub fn cancel_orders(&mut self, order_ids: &[OrderId], dt: DateTime<Utc>) -> Vec<OrderId> {
+        let mut cancelled = Vec::new();
+
+        for &order_id in order_ids {
+            if self.cancel_order(order_id, dt).is_ok() {
+                cancelled.push(order_id);
+            }
+        }
+
+        cancelled
+    }
+
+    /// Get orders created in a time range
+    pub fn get_orders_in_range(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Vec<&Order> {
+        self.open_orders
+            .values()
+            .chain(self.filled_orders.values())
+            .chain(self.cancelled_orders.values())
+            .chain(self.rejected_orders.values())
+            .filter(|o| o.created >= start && o.created <= end)
+            .collect()
+    }
+
     /// Clear all orders (for testing)
     #[cfg(test)]
     pub fn clear(&mut self) {

@@ -2,6 +2,10 @@
 
 pub mod adjustments;
 pub mod bundle;
+pub mod data_portal; // NEW: Unified data access
+pub mod dispatch_reader;
+pub mod frequency;
+pub mod minute_bars;
 
 use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};
