@@ -1,7 +1,8 @@
 //! Order types and management
 
 use crate::asset::Asset;
-use crate::types::{OrderId, Price, Quantity, Timestamp};
+use crate::types::{Cash, OrderId, Price, Quantity, Timestamp};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -65,8 +66,12 @@ pub struct Order {
     pub status: OrderStatus,
     /// Creation timestamp
     pub created_at: Timestamp,
+    /// Creation datetime (alternative field)
+    pub created: DateTime<Utc>,
     /// Last update timestamp
     pub updated_at: Timestamp,
+    /// Order amount in cash terms
+    pub amount: Cash,
 }
 
 impl Order {
@@ -83,7 +88,9 @@ impl Order {
             stop_price: None,
             status: OrderStatus::Created,
             created_at: timestamp,
+            created: timestamp,
             updated_at: timestamp,
+            amount: 0.0, // Will be calculated when order is filled
         }
     }
 
@@ -106,7 +113,9 @@ impl Order {
             stop_price: None,
             status: OrderStatus::Created,
             created_at: timestamp,
+            created: timestamp,
             updated_at: timestamp,
+            amount: quantity * limit_price, // Calculate expected amount
         }
     }
 
@@ -129,7 +138,9 @@ impl Order {
             stop_price: Some(stop_price),
             status: OrderStatus::Created,
             created_at: timestamp,
+            created: timestamp,
             updated_at: timestamp,
+            amount: quantity * stop_price, // Calculate expected amount
         }
     }
 
@@ -153,7 +164,9 @@ impl Order {
             stop_price: Some(stop_price),
             status: OrderStatus::Created,
             created_at: timestamp,
+            created: timestamp,
             updated_at: timestamp,
+            amount: quantity * limit_price, // Calculate expected amount at limit price
         }
     }
 
@@ -200,6 +213,16 @@ impl Order {
         self.status = OrderStatus::Cancelled;
         self.updated_at = timestamp;
     }
+
+    /// Get filled quantity
+    pub fn filled_quantity(&self) -> Quantity {
+        self.filled
+    }
+
+    /// Get open (unfilled) quantity
+    pub fn open_quantity(&self) -> Quantity {
+        self.quantity - self.filled
+    }
 }
 
 impl fmt::Display for Order {
@@ -216,11 +239,12 @@ impl fmt::Display for Order {
 mod tests {
     use super::*;
     use crate::asset::Asset;
-    use chrono::Utc;
+    use chrono::{NaiveDate, Utc};
 
     #[test]
     fn test_market_order() {
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
 
         assert_eq!(order.side, OrderSide::Buy);
@@ -233,7 +257,8 @@ mod tests {
 
     #[test]
     fn test_order_filling() {
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let mut order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
 
         order.fill(50.0, Utc::now());

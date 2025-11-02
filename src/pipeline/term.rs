@@ -3,14 +3,10 @@
 //! Terms represent computational nodes in the pipeline dependency graph.
 //! They form the building blocks for factor calculations.
 
-use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
-use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 
 /// Unique identifier for a term in the computational graph
 pub type TermId = u64;
@@ -211,25 +207,106 @@ impl Term for BaseTerm {
 }
 
 /// Binary operation term
+/// Corresponds to Python Zipline's comparison and arithmetic operators:
+/// - Add: __add__
+/// - Subtract: __sub__
+/// - Multiply: __mul__
+/// - Divide: __truediv__
+/// - Modulo: __mod__
+/// - Power: __pow__
+/// - Equal: __eq__
+/// - NotEqual: __ne__
+/// - Less: __lt__
+/// - LessEqual: __le__
+/// - Greater: __gt__
+/// - GreaterEqual: __ge__
+/// - And: __and__
+/// - Or: __or__
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
+    /// Addition operator (+)
     Add,
+    /// Subtraction operator (-)
     Subtract,
+    /// Multiplication operator (*)
     Multiply,
+    /// Division operator (/)
     Divide,
+    /// Modulo operator (%)
     Modulo,
+    /// Power operator (**)
     Power,
+    /// Equality comparison (==)
     Equal,
+    /// Inequality comparison (!=)
     NotEqual,
+    /// Less than comparison (<)
     Less,
+    /// Less than or equal comparison (<=)
     LessEqual,
+    /// Greater than comparison (>)
     Greater,
+    /// Greater than or equal comparison (>=)
     GreaterEqual,
+    /// Logical AND
     And,
+    /// Logical OR
     Or,
 }
 
+impl fmt::Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.python_name())
+    }
+}
+
 impl BinOp {
+    /// Get the Python operator name for this operation
+    pub fn python_name(&self) -> &'static str {
+        match self {
+            BinOp::Add => "__add__",
+            BinOp::Subtract => "__sub__",
+            BinOp::Multiply => "__mul__",
+            BinOp::Divide => "__truediv__",
+            BinOp::Modulo => "__mod__",
+            BinOp::Power => "__pow__",
+            BinOp::Equal => "__eq__",
+            BinOp::NotEqual => "__ne__",
+            BinOp::Less => "__lt__",
+            BinOp::LessEqual => "__le__",
+            BinOp::Greater => "__gt__",
+            BinOp::GreaterEqual => "__ge__",
+            BinOp::And => "__and__",
+            BinOp::Or => "__or__",
+        }
+    }
+
+    /// Check if this is an arithmetic operation
+    pub fn is_arithmetic(&self) -> bool {
+        matches!(
+            self,
+            BinOp::Add | BinOp::Subtract | BinOp::Multiply | BinOp::Divide
+        )
+    }
+
+    /// Check if this is a comparison operation
+    pub fn is_comparison(&self) -> bool {
+        matches!(
+            self,
+            BinOp::Equal
+                | BinOp::NotEqual
+                | BinOp::Less
+                | BinOp::LessEqual
+                | BinOp::Greater
+                | BinOp::GreaterEqual
+        )
+    }
+
+    /// Check if this is a logical operation
+    pub fn is_logical(&self) -> bool {
+        matches!(self, BinOp::And | BinOp::Or)
+    }
+
     /// Result dtype for this operation on given input types
     pub fn result_dtype(&self, left: DType, right: DType) -> Result<DType> {
         match self {
@@ -285,16 +362,49 @@ impl BinOp {
 }
 
 /// Unary operation term
+/// Corresponds to Python Zipline's unary operators:
+/// - Negate: __neg__
+/// - Not: __invert__ (for bool)
+/// - Abs: abs()
+/// - Sqrt: sqrt()
+/// - Log: log()
+/// - Exp: exp()
+/// - IsNaN: isnan()
+/// - IsNull: isnull()
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
+    /// Negation operator (-)
     Negate,
+    /// Logical NOT operator
     Not,
+    /// Absolute value
     Abs,
+    /// Square root
     Sqrt,
+    /// Natural logarithm
     Log,
+    /// Exponential function
     Exp,
+    /// Check if value is NaN
     IsNaN,
+    /// Check if value is null/missing
     IsNull,
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let name = match self {
+            UnaryOp::Negate => "__neg__",
+            UnaryOp::Not => "__invert__",
+            UnaryOp::Abs => "abs",
+            UnaryOp::Sqrt => "sqrt",
+            UnaryOp::Log => "log",
+            UnaryOp::Exp => "exp",
+            UnaryOp::IsNaN => "isnan",
+            UnaryOp::IsNull => "isnull",
+        };
+        write!(f, "{}", name)
+    }
 }
 
 impl UnaryOp {
@@ -353,7 +463,7 @@ impl BinaryOpTerm {
     ) -> Result<Self> {
         let dtype = op.result_dtype(left_dtype, right_dtype)?;
         Ok(Self {
-            base: BaseTerm::new(id, dtype, NDim::Array2D, format!("{:?}", op))
+            base: BaseTerm::new(id, dtype, NDim::Array2D, format!("BinOp({})", op))
                 .with_dependencies(vec![left, right]),
             op,
             left,
@@ -413,7 +523,7 @@ impl UnaryOpTerm {
     pub fn new(id: TermId, op: UnaryOp, input: TermId, input_dtype: DType) -> Result<Self> {
         let dtype = op.result_dtype(input_dtype)?;
         Ok(Self {
-            base: BaseTerm::new(id, dtype, NDim::Array2D, format!("{:?}", op))
+            base: BaseTerm::new(id, dtype, NDim::Array2D, format!("UnaryOp({})", op))
                 .with_dependencies(vec![input]),
             op,
             input,
@@ -553,5 +663,154 @@ mod tests {
         assert_eq!(term.op(), UnaryOp::Sqrt);
         assert_eq!(term.input(), 2);
         assert_eq!(term.dependencies(), vec![2]);
+    }
+
+    #[test]
+    fn test_binop_python_names() {
+        // Test that all comparison operations map to correct Python names
+        assert_eq!(BinOp::Equal.python_name(), "__eq__");
+        assert_eq!(BinOp::NotEqual.python_name(), "__ne__");
+        assert_eq!(BinOp::Less.python_name(), "__lt__");
+        assert_eq!(BinOp::LessEqual.python_name(), "__le__");
+        assert_eq!(BinOp::Greater.python_name(), "__gt__");
+        assert_eq!(BinOp::GreaterEqual.python_name(), "__ge__");
+
+        // Test arithmetic operations
+        assert_eq!(BinOp::Add.python_name(), "__add__");
+        assert_eq!(BinOp::Subtract.python_name(), "__sub__");
+        assert_eq!(BinOp::Multiply.python_name(), "__mul__");
+        assert_eq!(BinOp::Divide.python_name(), "__truediv__");
+        assert_eq!(BinOp::Modulo.python_name(), "__mod__");
+        assert_eq!(BinOp::Power.python_name(), "__pow__");
+
+        // Test logical operations
+        assert_eq!(BinOp::And.python_name(), "__and__");
+        assert_eq!(BinOp::Or.python_name(), "__or__");
+    }
+
+    #[test]
+    fn test_binop_display() {
+        // Display should show Python operator names
+        assert_eq!(format!("{}", BinOp::Equal), "__eq__");
+        assert_eq!(format!("{}", BinOp::Multiply), "__mul__");
+        assert_eq!(format!("{}", BinOp::Less), "__lt__");
+    }
+
+    #[test]
+    fn test_binop_categories() {
+        // Arithmetic operations
+        assert!(BinOp::Add.is_arithmetic());
+        assert!(BinOp::Multiply.is_arithmetic());
+        assert!(!BinOp::Equal.is_arithmetic());
+        assert!(!BinOp::And.is_arithmetic());
+
+        // Comparison operations
+        assert!(BinOp::Equal.is_comparison());
+        assert!(BinOp::Less.is_comparison());
+        assert!(BinOp::GreaterEqual.is_comparison());
+        assert!(!BinOp::Add.is_comparison());
+        assert!(!BinOp::And.is_comparison());
+
+        // Logical operations
+        assert!(BinOp::And.is_logical());
+        assert!(BinOp::Or.is_logical());
+        assert!(!BinOp::Equal.is_logical());
+        assert!(!BinOp::Add.is_logical());
+    }
+
+    #[test]
+    fn test_unary_op_display() {
+        assert_eq!(format!("{}", UnaryOp::Negate), "__neg__");
+        assert_eq!(format!("{}", UnaryOp::Not), "__invert__");
+        assert_eq!(format!("{}", UnaryOp::Abs), "abs");
+        assert_eq!(format!("{}", UnaryOp::Sqrt), "sqrt");
+        assert_eq!(format!("{}", UnaryOp::IsNaN), "isnan");
+    }
+
+    #[test]
+    fn test_multiply_type_compatibility() {
+        // Test that multiplication works with compatible numeric types
+        let result = BinOp::Multiply.result_dtype(DType::Float64, DType::Float64);
+        assert_eq!(result.unwrap(), DType::Float64);
+
+        let result = BinOp::Multiply.result_dtype(DType::Int32, DType::Float64);
+        assert_eq!(result.unwrap(), DType::Float64);
+
+        let result = BinOp::Multiply.result_dtype(DType::Float32, DType::Int64);
+        assert_eq!(result.unwrap(), DType::Float32);
+
+        // Test that multiplication fails with non-numeric types
+        let result = BinOp::Multiply.result_dtype(DType::String, DType::Float64);
+        assert!(result.is_err());
+
+        let result = BinOp::Multiply.result_dtype(DType::Bool, DType::Int32);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_comparison_all_variants() {
+        // Ensure all six comparison operators work correctly
+        let ops = vec![
+            BinOp::Equal,
+            BinOp::NotEqual,
+            BinOp::Less,
+            BinOp::LessEqual,
+            BinOp::Greater,
+            BinOp::GreaterEqual,
+        ];
+
+        for op in ops {
+            // All comparison ops should return Bool
+            let result = op.result_dtype(DType::Int32, DType::Float64);
+            assert_eq!(result.unwrap(), DType::Bool);
+
+            // All should be categorized as comparison
+            assert!(op.is_comparison());
+            assert!(!op.is_arithmetic());
+            assert!(!op.is_logical());
+        }
+    }
+
+    #[test]
+    fn test_term_names_with_operators() {
+        // Test that term names include operator display
+        let bin_term = BinaryOpTerm::new(1, BinOp::Add, 2, 3, DType::Float32, DType::Float64).unwrap();
+        assert!(bin_term.name().contains("__add__"));
+
+        let unary_term = UnaryOpTerm::new(1, UnaryOp::Sqrt, 2, DType::Int32).unwrap();
+        assert!(unary_term.name().contains("sqrt"));
+    }
+
+    #[test]
+    fn test_type_promotion_multiply() {
+        // Test type promotion for multiplication matches arithmetic rules
+
+        // Float64 has highest priority
+        assert_eq!(
+            BinOp::Multiply.result_dtype(DType::Float64, DType::Int32).unwrap(),
+            DType::Float64
+        );
+        assert_eq!(
+            BinOp::Multiply.result_dtype(DType::Float32, DType::Float64).unwrap(),
+            DType::Float64
+        );
+
+        // Float32 beats integers
+        assert_eq!(
+            BinOp::Multiply.result_dtype(DType::Float32, DType::Int64).unwrap(),
+            DType::Float32
+        );
+
+        // Int64 beats Int32
+        assert_eq!(
+            BinOp::Multiply.result_dtype(DType::Int64, DType::Int32).unwrap(),
+            DType::Int64
+        );
+
+        // Same types stay the same
+        assert_eq!(
+            BinOp::Multiply.result_dtype(DType::Int32, DType::Int32).unwrap(),
+            DType::Int32
+        );
     }
 }

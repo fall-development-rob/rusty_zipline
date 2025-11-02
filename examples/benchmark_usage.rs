@@ -5,7 +5,7 @@
 //! - Calculate returns and metrics
 //! - Compare portfolio performance against benchmarks
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use rusty_zipline::asset::Asset;
 use rusty_zipline::data::bar_reader::{Bar, BarReader, DailyBarReader};
 use rusty_zipline::data::benchmarks::{
@@ -77,7 +77,8 @@ fn asset_benchmark_example() -> Result<()> {
     println!("   Use any asset as benchmark (e.g., QQQ for tech-heavy strategy)\n");
 
     // Create sample asset and returns
-    let qqq_asset = Asset::equity(1, "QQQ".to_string(), "NASDAQ".to_string())
+    let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+    let qqq_asset = Asset::equity(1, "QQQ".to_string(), "NASDAQ".to_string(), start_date)
         .with_name("Invesco QQQ Trust".to_string());
 
     let start = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
@@ -184,7 +185,8 @@ fn spy_benchmark_example() -> Result<()> {
     let mut bar_reader = DailyBarReader::new();
 
     // Create SPY asset
-    let spy_asset = Asset::equity(u64::MAX - 1, "SPY".to_string(), "ARCA".to_string());
+    let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+    let spy_asset = Asset::equity(u64::MAX - 1, "SPY".to_string(), "ARCA".to_string(), start_date);
 
     // Sample SPY data (in practice, load from data bundle)
     let start = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();

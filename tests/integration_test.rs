@@ -18,7 +18,8 @@ use rusty_zipline::{
 #[test]
 fn test_buy_and_hold_strategy() {
     // Setup
-    let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string());
+    let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string(), start_date);
     let mut data_source = InMemoryDataSource::new();
     data_source.add_asset(asset.clone());
 
@@ -52,7 +53,8 @@ fn test_buy_and_hold_strategy() {
 
 #[test]
 fn test_order_execution() {
-    let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string());
+    let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string(), start_date);
     let mut context = Context::new(10_000.0);
 
     // Place order
@@ -69,7 +71,8 @@ fn test_order_execution() {
 #[test]
 fn test_portfolio_value_tracking() {
     let mut data_source = InMemoryDataSource::new();
-    let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string());
+    let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string(), start_date);
     data_source.add_asset(asset.clone());
 
     let start = Utc::now();
@@ -149,7 +152,8 @@ fn test_data_history() {
     use zipline_rust::data::BarData;
 
     let mut bar_data = BarData::new(100);
-    let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string());
+    let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string(), start_date);
 
     // Add multiple bars
     for i in 0..20 {

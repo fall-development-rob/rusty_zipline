@@ -2,7 +2,7 @@
 //!
 //! This module provides statistical and risk-adjusted performance indicators
 
-use statrs::statistics::{Data, Statistics};
+use statrs::statistics::{Data, Distribution};
 use std::collections::VecDeque;
 
 /// Correlation - Rolling correlation between two series

@@ -122,6 +122,15 @@ pub struct SimulatedBroker {
     commission_model: Box<dyn CommissionModel>,
 }
 
+impl std::fmt::Debug for SimulatedBroker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimulatedBroker")
+            .field("slippage_model", &"<dyn SlippageModel>")
+            .field("commission_model", &"<dyn CommissionModel>")
+            .finish()
+    }
+}
+
 impl SimulatedBroker {
     /// Create a new simulated broker
     pub fn new(
@@ -235,11 +244,12 @@ mod tests {
     use super::*;
     use crate::asset::Asset;
     use crate::order::{Order, OrderSide};
-    use chrono::Utc;
+    use chrono::{NaiveDate, Utc};
 
     #[test]
     fn test_fixed_slippage() {
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
         let slippage = FixedSlippage::new(0.05);
 
@@ -249,7 +259,8 @@ mod tests {
 
     #[test]
     fn test_volume_share_slippage() {
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
         let slippage = VolumeShareSlippage::new(0.001); // 0.1%
 
@@ -259,7 +270,8 @@ mod tests {
 
     #[test]
     fn test_per_share_commission() {
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let mut order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
         order.fill(100.0, Utc::now());
 
@@ -271,7 +283,8 @@ mod tests {
     #[test]
     fn test_simulated_broker_execution() {
         let broker = SimulatedBroker::default_broker();
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let mut order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
 
         let result = broker.execute_order(&mut order, 150.0, Utc::now()).unwrap();

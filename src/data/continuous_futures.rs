@@ -128,7 +128,6 @@ impl ContractChain {
             )));
         }
 
-        let expiration = contract.expiration;
         self.contracts.push(contract);
 
         // Re-sort and rebuild index
@@ -234,7 +233,7 @@ impl RollSchedule {
     }
 
     /// Determine if we should roll at this date
-    pub fn should_roll(&self, contract: &FutureContract, dt: DateTime<Utc>, bars: &[Bar]) -> bool {
+    pub fn should_roll(&self, contract: &FutureContract, dt: DateTime<Utc>, _bars: &[Bar]) -> bool {
         match self.style {
             RollStyle::Calendar => {
                 let days_to_exp = contract.days_until_expiration(dt);
@@ -286,6 +285,16 @@ pub struct DefaultContinuousFutureReader {
     roll_schedule: RollSchedule,
 }
 
+impl std::fmt::Debug for DefaultContinuousFutureReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DefaultContinuousFutureReader")
+            .field("bar_reader", &"<dyn BarReader>")
+            .field("chains", &format!("{} chains", self.chains.len()))
+            .field("roll_schedule", &self.roll_schedule)
+            .finish()
+    }
+}
+
 impl DefaultContinuousFutureReader {
     /// Create a new continuous futures reader
     pub fn new(bar_reader: Arc<dyn BarReader>) -> Self {
@@ -328,11 +337,13 @@ impl DefaultContinuousFutureReader {
             // Get active contract for this date
             if let Some(contract) = chain.get_contract_at(current_date, offset) {
                 // Create mock asset for bar reader
+                let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
                 let asset = crate::asset::Asset::new(
                     contract.asset_id,
                     contract.symbol.clone(),
                     "FUTURES".to_string(),
                     crate::asset::AssetType::Future,
+                    start_date,
                 );
 
                 // Get bar for this contract
@@ -351,11 +362,13 @@ impl DefaultContinuousFutureReader {
                             || adjustment == AdjustmentStyle::BackwardRatio
                         {
                             if let Some(next_contract) = chain.get_contract_at(current_date, offset + 1) {
+                                let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
                                 let next_asset = crate::asset::Asset::new(
                                     next_contract.asset_id,
                                     next_contract.symbol.clone(),
                                     "FUTURES".to_string(),
                                     crate::asset::AssetType::Future,
+                                    start_date,
                                 );
 
                                 if let Ok(next_bar) = self.bar_reader.get_bar(&next_asset, current_date) {
@@ -384,6 +397,46 @@ impl DefaultContinuousFutureReader {
         bar.close *= ratio;
         // Volume typically not adjusted
         bar
+    }
+
+    /// Get active contract for default chain at a specific date (convenience method)
+    /// This is a simplified version for single-chain readers
+    pub fn get_active_contract(&self, dt: DateTime<Utc>) -> Result<FutureContract> {
+        // Try to get the first available chain if there's only one
+        if self.chains.len() == 1 {
+            let (root_symbol, chain) = self.chains.iter().next().unwrap();
+            chain
+                .get_contract_at(dt, 0)
+                .cloned()
+                .ok_or_else(|| {
+                    ZiplineError::DataNotFound(format!(
+                        "No active contract found for {} at {:?}",
+                        root_symbol, dt
+                    ))
+                })
+        } else {
+            Err(ZiplineError::InvalidData(
+                "Multiple chains present. Use ContinuousFutureReader trait method with root_symbol parameter".to_string()
+            ))
+        }
+    }
+
+    /// Get continuous prices for default chain (convenience method)
+    /// This is a simplified version for single-chain readers
+    pub fn get_continuous_prices(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<Bar>> {
+        // Try to get the first available chain if there's only one
+        if self.chains.len() == 1 {
+            let (root_symbol, chain) = self.chains.iter().next().unwrap();
+            self.build_continuous_series(chain, start, end, 0, AdjustmentStyle::None)
+        } else {
+            Err(ZiplineError::InvalidData(
+                "Multiple chains present. Use ContinuousFutureReader trait method with root_symbol parameter".to_string()
+            ))
+        }
     }
 }
 

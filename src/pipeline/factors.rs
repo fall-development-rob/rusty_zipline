@@ -1,7 +1,6 @@
 //! Technical analysis factors for pipeline system
 
-use crate::error::{Result, ZiplineError};
-use statrs::statistics::{Data, OrderStatistics, Statistics};
+use statrs::statistics::{Data, Distribution};
 use std::collections::VecDeque;
 
 /// Simple Moving Average (SMA)

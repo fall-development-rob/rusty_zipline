@@ -5,10 +5,11 @@
 use crate::error::{Result, ZiplineError};
 use crate::pipeline::term::{Term, TermId};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::sync::Arc;
 
 /// Computational dependency graph for pipeline execution
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Graph {
     /// All terms in the graph
     terms: HashMap<TermId, Arc<dyn Term>>,
@@ -311,6 +312,17 @@ impl Graph {
 impl Default for Graph {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl fmt::Debug for Graph {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Graph")
+            .field("term_count", &self.terms.len())
+            .field("dependencies", &self.dependencies)
+            .field("dependents", &self.dependents)
+            .field("execution_order", &self.execution_order)
+            .finish()
     }
 }
 

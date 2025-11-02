@@ -1,5 +1,6 @@
 //! Finance module - portfolio, metrics, controls, blotter, commission, slippage
 
+pub mod account; // NEW: P0 - Account object for account-level metrics
 pub mod asset_restrictions; // NEW: Asset trading restrictions
 pub mod blotter;
 pub mod cancel_policy; // NEW: Order cancellation policies
@@ -8,10 +9,12 @@ pub mod constants; // NEW: Trading constants and defaults
 pub mod controls;
 pub mod ledger; // NEW: P1 - Transaction tracking and P&L system
 pub mod metrics;
+pub mod portfolio;
 pub mod slippage;
 pub mod trading; // NEW: Trading controls and validations
 pub mod transaction; // NEW: Transaction type
 
+pub use account::Account;
 pub use asset_restrictions::{
     CompositeRestrictions, HistoricalRestrictions, NoRestrictions, RestrictionReason,
     Restrictions, SecurityListRestrictions, StaticRestrictions,
@@ -38,8 +41,6 @@ pub use slippage::{
     FixedBasisPointsSlippage, LinearImpact, NoSlippage, SlippageModel, SquareRootImpact,
     VolumeShareSlippage,
 };
+pub use portfolio::{Portfolio, Position};
 pub use trading::{MaxLeverage, MaxOrderSize, MaxPositionSize, TradingControl};
 pub use transaction::Transaction;
-
-// Re-export from parent for convenience
-pub use crate::finance::{Portfolio, Position};

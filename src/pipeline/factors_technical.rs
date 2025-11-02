@@ -142,6 +142,7 @@ pub struct StochasticOscillator {
     period: usize,
     highs: VecDeque<f64>,
     lows: VecDeque<f64>,
+    #[allow(dead_code)] // Reserved for slow stochastic implementation
     k_period: usize,
     d_period: usize,
     k_values: VecDeque<f64>,
@@ -281,12 +282,15 @@ impl Aroon {
 
         if self.highs.len() == self.period {
             // Find periods since highest high and lowest low
+            let highest_high = self.highs.iter().fold(f64::MIN, |a, &b| a.max(b));
+            let lowest_low = self.lows.iter().fold(f64::MAX, |a, &b| a.min(b));
+
             let days_since_high = self
                 .highs
                 .iter()
                 .enumerate()
                 .rev()
-                .find(|(_, &h)| h == *self.highs.iter().fold(f64::MIN, |a, &b| a.max(b)))
+                .find(|(_, &h)| h == highest_high)
                 .map(|(i, _)| self.period - 1 - i)
                 .unwrap_or(0);
 
@@ -295,7 +299,7 @@ impl Aroon {
                 .iter()
                 .enumerate()
                 .rev()
-                .find(|(_, &l)| l == *self.lows.iter().fold(f64::MAX, |a, &b| a.min(b)))
+                .find(|(_, &l)| l == lowest_low)
                 .map(|(i, _)| self.period - 1 - i)
                 .unwrap_or(0);
 

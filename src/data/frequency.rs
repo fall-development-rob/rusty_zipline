@@ -1,7 +1,7 @@
 //! Data frequency types and conversion utilities
 
 use crate::error::{Result, ZiplineError};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

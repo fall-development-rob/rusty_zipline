@@ -1,7 +1,7 @@
 //! Trading calendar implementation
 
 use crate::error::{Result, ZiplineError};
-use chrono::{Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Weekday};
+use chrono::{Datelike, Duration, NaiveDate, NaiveTime, Weekday};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
@@ -189,10 +189,14 @@ impl NYSECalendar {
         let first_day = NaiveDate::from_ymd_opt(year, month, 1).unwrap();
         let first_weekday = first_day.weekday();
 
-        let days_until_weekday = if weekday >= first_weekday {
-            weekday.num_days_from_monday() - first_weekday.num_days_from_monday()
+        // Convert to numbers for comparison since Weekday doesn't implement PartialOrd
+        let target_day_num = weekday.num_days_from_monday();
+        let first_day_num = first_weekday.num_days_from_monday();
+
+        let days_until_weekday = if target_day_num >= first_day_num {
+            target_day_num - first_day_num
         } else {
-            7 - (first_weekday.num_days_from_monday() - weekday.num_days_from_monday())
+            7 - (first_day_num - target_day_num)
         };
 
         let target_day = 1 + days_until_weekday + (n - 1) * 7;

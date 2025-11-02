@@ -10,6 +10,7 @@ use crate::types::Timestamp;
 use std::sync::Arc;
 
 /// Configuration for simulation engine
+#[derive(Debug)]
 pub struct EngineConfig {
     /// Starting capital
     pub starting_cash: f64,
@@ -36,6 +37,17 @@ pub struct SimulationEngine {
     calendar: Arc<dyn TradingCalendar>,
     /// Performance tracker
     performance: PerformanceTracker,
+}
+
+impl std::fmt::Debug for SimulationEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimulationEngine")
+            .field("config", &self.config)
+            .field("broker", &self.broker)
+            .field("calendar", &"<dyn TradingCalendar>")
+            .field("performance", &self.performance)
+            .finish()
+    }
 }
 
 impl SimulationEngine {
@@ -221,7 +233,8 @@ mod tests {
     fn test_simple_backtest() {
         // Create data source with sample data
         let mut data_source = InMemoryDataSource::new();
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         data_source.add_asset(asset.clone());
 
         let start = Utc::now();

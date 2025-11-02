@@ -1,9 +1,9 @@
 //! Data adjustments for corporate actions (splits, dividends, mergers)
 
 use crate::error::{Result, ZiplineError};
-use crate::types::{Bar, Price, Timestamp, Volume};
+use crate::types::{Bar, Price, Quantity};
 use chrono::{DateTime, Utc};
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -64,29 +64,29 @@ impl Adjustment {
         }
 
         match &self.kind {
-            AdjustmentKind::Split { ratio } => price / ratio,
+            AdjustmentKind::Split { ratio } => price / (*ratio),
             AdjustmentKind::Dividend { amount, kind } => match kind {
-                DividendKind::Cash => price - amount,
+                DividendKind::Cash => price - (*amount),
                 DividendKind::Stock => price, // Stock dividends are handled via splits
             },
-            AdjustmentKind::Merger { ratio, .. } => price * ratio,
+            AdjustmentKind::Merger { ratio, .. } => price * (*ratio),
             AdjustmentKind::SpinOff { .. } => price, // Spin-offs typically don't adjust price
         }
     }
 
     /// Apply this adjustment to volume
-    pub fn adjust_volume(&self, volume: Volume, as_of_date: DateTime<Utc>) -> Volume {
+    pub fn adjust_volume(&self, volume: Quantity, as_of_date: DateTime<Utc>) -> Quantity {
         if as_of_date < self.effective_date {
             return volume;
         }
 
         match &self.kind {
-            AdjustmentKind::Split { ratio } => volume * ratio,
+            AdjustmentKind::Split { ratio } => volume * (*ratio),
             AdjustmentKind::Dividend { kind, .. } => match kind {
                 DividendKind::Stock => volume, // Adjust via split if needed
                 DividendKind::Cash => volume,
             },
-            AdjustmentKind::Merger { ratio, .. } => volume / ratio,
+            AdjustmentKind::Merger { ratio, .. } => volume / (*ratio),
             AdjustmentKind::SpinOff { .. } => volume,
         }
     }

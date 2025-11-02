@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use chrono::{Duration, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use std::sync::Arc;
 use zipline_rust::{
     algorithm::BuyAndHold,
@@ -14,7 +14,8 @@ use zipline_rust::{
 fn benchmark_backtest(c: &mut Criterion) {
     c.bench_function("backtest_100_days", |b| {
         b.iter(|| {
-            let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string());
+            let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+            let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string(), start_date);
             let mut data_source = InMemoryDataSource::new();
             data_source.add_asset(asset.clone());
 
@@ -49,7 +50,8 @@ fn benchmark_order_execution(c: &mut Criterion) {
 
     c.bench_function("order_execution_1000", |b| {
         b.iter(|| {
-            let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string());
+            let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+            let asset = Asset::equity(1, "TEST".to_string(), "NASDAQ".to_string(), start_date);
 
             for _ in 0..1000 {
                 let _order = Order::market(

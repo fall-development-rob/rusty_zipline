@@ -1,6 +1,6 @@
 //! Buy and hold strategy example
 
-use chrono::{Duration, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use std::sync::Arc;
 use zipline_rust::prelude::*;
 use zipline_rust::{
@@ -17,7 +17,8 @@ fn main() {
     println!("=== Zipline-Rust: Buy and Hold Example ===\n");
 
     // Create asset
-    let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string())
+    let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+    let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date)
         .with_name("Apple Inc.".to_string());
 
     // Create data source with sample data

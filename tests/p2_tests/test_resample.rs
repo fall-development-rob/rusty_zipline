@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod resample_tests {
-    use chrono::{DateTime, Utc, TimeZone, Duration, Datelike};
+    use chrono::{DateTime, Utc, TimeZone, Duration, Datelike, Timelike};
 
     #[derive(Debug, Clone, Copy)]
     struct Bar {

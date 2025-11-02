@@ -4,7 +4,7 @@
 //! such as at end of day (EOD) or never.
 
 use crate::order::Order;
-use chrono::{DateTime, Utc};
+use chrono::{NaiveDate, DateTime, Timelike, Utc};
 
 /// Cancel policy trait
 pub trait CancelPolicy: Send + Sync {
@@ -138,7 +138,8 @@ mod tests {
     #[test]
     fn test_never_cancel() {
         let policy = NeverCancel;
-        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string(), start_date);
 
         let order_time = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
         let check_time = Utc.with_ymd_and_hms(2024, 1, 16, 10, 0, 0).unwrap();
@@ -152,7 +153,8 @@ mod tests {
     #[test]
     fn test_eod_cancel_same_day() {
         let policy = EODCancel::with_close_hour(16);
-        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string(), start_date);
 
         let order_time = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
         let before_close = Utc.with_ymd_and_hms(2024, 1, 15, 15, 0, 0).unwrap();
@@ -167,7 +169,8 @@ mod tests {
     #[test]
     fn test_eod_cancel_next_day() {
         let policy = EODCancel::new();
-        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string(), start_date);
 
         let order_time = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
         let next_day = Utc.with_ymd_and_hms(2024, 1, 16, 10, 0, 0).unwrap();
@@ -180,7 +183,8 @@ mod tests {
     #[test]
     fn test_eod_cancel_next() {
         let policy = EODCancelNext::with_open_hour(9);
-        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string(), start_date);
 
         let order_time = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
         let next_day_before_open = Utc.with_ymd_and_hms(2024, 1, 16, 8, 0, 0).unwrap();

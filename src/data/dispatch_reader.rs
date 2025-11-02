@@ -1,7 +1,7 @@
 //! Multi-frequency data dispatch reader
 
 use crate::data::frequency::DataFrequency;
-use crate::data::minute_bars::{MinuteBarReader, MinuteBar};
+use crate::data::minute_bars::MinuteBarReader;
 use crate::error::{Result, ZiplineError};
 use crate::types::Bar;
 use chrono::{DateTime, Utc};

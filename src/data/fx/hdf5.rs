@@ -141,7 +141,7 @@ impl HDF5FXRateReader {
     }
 
     /// Load rate series for a currency pair from HDF5
-    fn load_series(&self, from: Currency, to: Currency) -> Result<CachedRateSeries> {
+    fn load_series(&self, _from: Currency, _to: Currency) -> Result<CachedRateSeries> {
         // In full implementation with hdf5 crate:
         // 1. Open file: hdf5::File::open(&self.file_path)?
         // 2. Navigate to dataset: file.dataset(&format!("/rates/{}/{}", from, to))?
@@ -237,12 +237,12 @@ impl HDF5FXRateReader {
 
         let series = self.get_series(from, to)?;
         let mut file = File::create(output_path).map_err(|e| {
-            ZiplineError::IOError(format!("Failed to create CSV file: {}", e))
+            ZiplineError::DataError(format!("Failed to create CSV file: {}", e))
         })?;
 
         // Write header
         writeln!(file, "timestamp,from_currency,to_currency,rate").map_err(|e| {
-            ZiplineError::IOError(format!("Failed to write CSV header: {}", e))
+            ZiplineError::DataError(format!("Failed to write CSV header: {}", e))
         })?;
 
         // Write data
@@ -255,7 +255,7 @@ impl HDF5FXRateReader {
                 to.as_str(),
                 rate
             )
-            .map_err(|e| ZiplineError::IOError(format!("Failed to write CSV row: {}", e)))?;
+            .map_err(|e| ZiplineError::DataError(format!("Failed to write CSV row: {}", e)))?;
         }
 
         Ok(())

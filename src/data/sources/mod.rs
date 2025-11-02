@@ -19,11 +19,6 @@ pub use yahoo::YahooFinanceSource;
 #[cfg(feature = "async")]
 pub use alpha_vantage::AlphaVantageSource;
 
-use crate::error::{Result, ZiplineError};
-use crate::types::Bar;
-use chrono::{DateTime, Utc};
-use hashbrown::HashMap;
-use std::sync::Arc;
 
 /// Registry for managing multiple data sources
 #[cfg(feature = "async")]

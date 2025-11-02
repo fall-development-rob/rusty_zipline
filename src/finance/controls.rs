@@ -4,6 +4,7 @@ use crate::algorithm::Context;
 use crate::error::{Result, ZiplineError};
 use crate::order::Order;
 use chrono::Duration;
+use chrono::NaiveDate;
 use hashbrown::HashSet;
 use std::collections::VecDeque;
 
@@ -60,10 +61,11 @@ impl TradingControl for MaxOrderSize {
     fn validate_order(&self, order: &Order, context: &Context) -> Result<()> {
         if let Some(max) = self.max_shares {
             if order.quantity > max {
-                return Err(ZiplineError::InvalidOrder(format!(
-                    "Order size {} exceeds maximum of {}",
-                    order.quantity, max
-                )));
+                return Err(ZiplineError::MaxOrderSizeExceeded {
+                    asset: order.asset.id,
+                    order_size: order.quantity,
+                    max_size: max,
+                });
             }
         }
 
@@ -71,10 +73,11 @@ impl TradingControl for MaxOrderSize {
             // Estimate notional value (would need current price in real implementation)
             let estimated_notional = order.quantity * context.portfolio.portfolio_value / 100.0;
             if estimated_notional > max {
-                return Err(ZiplineError::InvalidOrder(format!(
-                    "Order notional value ~{} exceeds maximum of {}",
-                    estimated_notional, max
-                )));
+                return Err(ZiplineError::MaxOrderSizeExceeded {
+                    asset: order.asset.id,
+                    order_size: estimated_notional,
+                    max_size: max,
+                });
             }
         }
 
@@ -112,7 +115,7 @@ impl MaxOrderCount {
 }
 
 impl TradingControl for MaxOrderCount {
-    fn validate_order(&self, order: &Order, context: &Context) -> Result<()> {
+    fn validate_order(&self, _order: &Order, context: &Context) -> Result<()> {
         let cutoff = context.timestamp - self.period;
         let recent_orders: usize = self
             .order_times
@@ -121,10 +124,11 @@ impl TradingControl for MaxOrderCount {
             .count();
 
         if recent_orders >= self.max_count {
-            return Err(ZiplineError::InvalidOrder(format!(
-                "Order count {} in last {:?} exceeds maximum of {}",
-                recent_orders, self.period, self.max_count
-            )));
+            return Err(ZiplineError::MaxOrderCountExceeded {
+                current_count: recent_orders,
+                max_count: self.max_count,
+                date: context.timestamp,
+            });
         }
 
         Ok(())
@@ -181,11 +185,13 @@ impl TradingControl for MaxPositionSize {
 
         if let Some(max) = self.max_shares {
             if new_position.abs() > max {
-                return Err(ZiplineError::InvalidOrder(format!(
-                    "New position size {} would exceed maximum of {}",
-                    new_position.abs(),
-                    max
-                )));
+                return Err(ZiplineError::MaxPositionSizeExceeded {
+                    asset: order.asset.id,
+                    symbol: order.asset.symbol.clone(),
+                    attempted_order: order.quantity,
+                    max_shares: self.max_shares,
+                    max_notional: None,
+                });
             }
         }
 
@@ -193,12 +199,15 @@ impl TradingControl for MaxPositionSize {
             // Estimate position value as percentage of portfolio
             let estimated_value = new_position.abs() * 100.0; // Placeholder
             let pct = estimated_value / context.portfolio.portfolio_value;
+            let max_notional = max_pct * context.portfolio.portfolio_value;
             if pct > max_pct {
-                return Err(ZiplineError::InvalidOrder(format!(
-                    "New position would be {:.1}% of portfolio, exceeding maximum of {:.1}%",
-                    pct * 100.0,
-                    max_pct * 100.0
-                )));
+                return Err(ZiplineError::MaxPositionSizeExceeded {
+                    asset: order.asset.id,
+                    symbol: order.asset.symbol.clone(),
+                    attempted_order: order.quantity,
+                    max_shares: None,
+                    max_notional: Some(max_notional),
+                });
             }
         }
 
@@ -304,10 +313,10 @@ impl AccountControl for MaxLeverage {
     fn validate_account(&self, context: &Context) -> Result<()> {
         let leverage = context.portfolio.leverage();
         if leverage > self.max_leverage {
-            return Err(ZiplineError::InvalidOrder(format!(
-                "Account leverage {:.2} exceeds maximum of {:.2}",
-                leverage, self.max_leverage
-            )));
+            return Err(ZiplineError::MaxLeverageExceeded {
+                current_leverage: leverage,
+                max_leverage: self.max_leverage,
+            });
         }
         Ok(())
     }
@@ -428,7 +437,7 @@ impl SectorExposure {
         let mut sector_values: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
 
         for position in context.portfolio.positions.values() {
-            if let Some(sector) = self.asset_sectors.get(&position.asset_id) {
+            if let Some(sector) = self.asset_sectors.get(&position.asset.id) {
                 let value = position.quantity * position.cost_basis; // Approximation
                 *sector_values.entry(sector.clone()).or_insert(0.0) += value;
             }
@@ -576,7 +585,8 @@ mod tests {
     fn test_max_order_size() {
         let control = MaxOrderSize::shares(100.0);
         let context = Context::new(100000.0);
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
 
         let valid_order = Order::market(asset.clone(), OrderSide::Buy, 50.0, Utc::now());
         assert!(control.validate_order(&valid_order, &context).is_ok());
@@ -589,7 +599,8 @@ mod tests {
     fn test_long_only() {
         let control = LongOnly;
         let mut context = Context::new(100000.0);
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
 
         // Buying is allowed
         let buy_order = Order::market(asset.clone(), OrderSide::Buy, 100.0, Utc::now());
@@ -606,8 +617,10 @@ mod tests {
         control.add_asset(1);
 
         let context = Context::new(100000.0);
-        let restricted_asset = Asset::equity(1, "BANNED".to_string(), "NYSE".to_string());
-        let allowed_asset = Asset::equity(2, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let restricted_asset = Asset::equity(1, "BANNED".to_string(), "NYSE".to_string(), start_date);
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let allowed_asset = Asset::equity(2, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
 
         let restricted_order = Order::market(restricted_asset, OrderSide::Buy, 100.0, Utc::now());
         assert!(control.validate_order(&restricted_order, &context).is_err());
@@ -626,7 +639,8 @@ mod tests {
         assert_eq!(manager.control_count(), (2, 1));
 
         let context = Context::new(100000.0);
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let order = Order::market(asset, OrderSide::Buy, 50.0, Utc::now());
 
         assert!(manager.validate_order(&order, &context).is_ok());
@@ -640,7 +654,8 @@ mod tests {
         control.register_asset(2, "Healthcare".to_string());
 
         let context = Context::new(100000.0);
-        let tech_asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let tech_asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
 
         let order = Order::market(tech_asset, OrderSide::Buy, 100.0, Utc::now());
         // Should pass for reasonable order
@@ -658,8 +673,10 @@ mod tests {
 
         let context = Context::new(100000.0);
 
-        let low_vol_asset = Asset::equity(1, "STABLE".to_string(), "NYSE".to_string());
-        let high_vol_asset = Asset::equity(2, "VOLATILE".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let low_vol_asset = Asset::equity(1, "STABLE".to_string(), "NYSE".to_string(), start_date);
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let high_vol_asset = Asset::equity(2, "VOLATILE".to_string(), "NYSE".to_string(), start_date);
 
         let low_vol_order = Order::market(low_vol_asset, OrderSide::Buy, 100.0, Utc::now());
         assert!(control.validate_order(&low_vol_order, &context).is_ok());
@@ -675,7 +692,8 @@ mod tests {
     fn test_position_concentration() {
         let control = PositionConcentration::new(0.25); // 25% max concentration
         let context = Context::new(100000.0);
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
 
         let order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
         // Should validate concentration limits

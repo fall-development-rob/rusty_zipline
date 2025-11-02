@@ -2,7 +2,7 @@
 
 use crate::asset::{Asset, AssetType};
 use crate::error::{Result, ZiplineError};
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 
@@ -24,7 +24,9 @@ pub struct AssetMetadata {
 impl AssetMetadata {
     /// Convert to simplified Asset struct
     pub fn to_asset(&self) -> Asset {
-        let mut asset = Asset::new(self.id, self.symbol.clone(), self.exchange.clone(), self.asset_type);
+        // Use start_date from metadata, or default to a sensible fallback
+        let start_date = self.start_date.unwrap_or_else(|| NaiveDate::from_ymd_opt(2000, 1, 1).unwrap());
+        let mut asset = Asset::new(self.id, self.symbol.clone(), self.exchange.clone(), self.asset_type, start_date);
         if let Some(name) = &self.name {
             asset = asset.with_name(name.clone());
         }

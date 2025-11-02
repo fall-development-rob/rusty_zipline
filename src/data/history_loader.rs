@@ -178,6 +178,22 @@ pub struct HistoryLoader {
     cache_misses: Arc<RwLock<usize>>,
 }
 
+impl std::fmt::Debug for HistoryLoader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let cache_size = self.cache.read().map(|c| c.len()).unwrap_or(0);
+        let hits = self.cache_hits.read().map(|h| *h).unwrap_or(0);
+        let misses = self.cache_misses.read().map(|m| *m).unwrap_or(0);
+
+        f.debug_struct("HistoryLoader")
+            .field("bar_reader", &"<dyn BarReader>")
+            .field("cache_size", &cache_size)
+            .field("max_cache_size", &self.max_cache_size)
+            .field("cache_hits", &hits)
+            .field("cache_misses", &misses)
+            .finish()
+    }
+}
+
 impl HistoryLoader {
     /// Create new history loader
     pub fn new(bar_reader: Arc<dyn BarReader>) -> Self {

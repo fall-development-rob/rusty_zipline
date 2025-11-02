@@ -4,9 +4,9 @@
 //! relative performance metrics against a reference index (e.g., S&P 500).
 
 use crate::asset::Asset;
-use crate::data::bar_reader::{BarReader, SessionLabel};
+use crate::data::bar_reader::BarReader;
 use crate::error::{Result, ZiplineError};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -55,7 +55,7 @@ pub trait BenchmarkReader: Send + Sync {
 }
 
 /// S&P 500 (SPY) benchmark - default benchmark
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SPYBenchmark {
     /// Cached return data: date -> return
     returns_cache: HashMap<DateTime<Utc>, f64>,
@@ -65,14 +65,26 @@ pub struct SPYBenchmark {
     spy_asset: Asset,
 }
 
+impl std::fmt::Debug for SPYBenchmark {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SPYBenchmark")
+            .field("returns_cache", &format!("{} entries", self.returns_cache.len()))
+            .field("bar_reader", &"<dyn BarReader>")
+            .field("spy_asset", &self.spy_asset)
+            .finish()
+    }
+}
+
 impl SPYBenchmark {
     /// Create new SPY benchmark with bar reader
     pub fn new(bar_reader: Arc<dyn BarReader>) -> Result<Self> {
-        // Create SPY asset
+        // Create SPY asset (SPY started trading 1993-01-29)
+        let start_date = NaiveDate::from_ymd_opt(1993, 1, 29).unwrap();
         let spy_asset = Asset::equity(
             u64::MAX - 1, // Special ID for SPY
             "SPY".to_string(),
             "ARCA".to_string(),
+            start_date,
         )
         .with_name("SPDR S&P 500 ETF Trust".to_string());
 
@@ -85,10 +97,12 @@ impl SPYBenchmark {
 
     /// Create with pre-loaded returns data
     pub fn with_returns(returns: Vec<(DateTime<Utc>, f64)>) -> Self {
+        let start_date = NaiveDate::from_ymd_opt(1993, 1, 29).unwrap();
         let spy_asset = Asset::equity(
             u64::MAX - 1,
             "SPY".to_string(),
             "ARCA".to_string(),
+            start_date,
         );
 
         Self {
@@ -155,7 +169,7 @@ impl BenchmarkReader for SPYBenchmark {
 }
 
 /// Custom asset benchmark - use any asset as benchmark
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AssetBenchmark {
     /// The asset to use as benchmark
     asset: Asset,
@@ -163,6 +177,16 @@ pub struct AssetBenchmark {
     bar_reader: Arc<dyn BarReader>,
     /// Cached returns
     returns_cache: HashMap<DateTime<Utc>, f64>,
+}
+
+impl std::fmt::Debug for AssetBenchmark {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AssetBenchmark")
+            .field("asset", &self.asset)
+            .field("bar_reader", &"<dyn BarReader>")
+            .field("returns_cache", &format!("{} entries", self.returns_cache.len()))
+            .finish()
+    }
 }
 
 impl AssetBenchmark {
@@ -475,7 +499,8 @@ mod tests {
 
     #[test]
     fn test_asset_benchmark() {
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let start = Utc::now();
 
         let returns = vec![

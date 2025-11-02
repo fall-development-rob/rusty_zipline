@@ -7,7 +7,7 @@ use crate::calendar::TradingCalendar;
 use crate::data::bar_reader::Bar;
 use crate::data::frequency::DataFrequency;
 use crate::error::{Result, ZiplineError};
-use chrono::{Datelike, DateTime, Duration, Utc, Weekday};
+use chrono::{Datelike, DateTime, Duration, Utc};
 use std::sync::Arc;
 
 /// Trait for resampling bar data between frequencies
@@ -111,9 +111,17 @@ impl OHLCVAggregator {
 }
 
 /// Minute to daily resampler
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MinuteToDaily {
     calendar: Option<Arc<dyn TradingCalendar>>,
+}
+
+impl std::fmt::Debug for MinuteToDaily {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MinuteToDaily")
+            .field("calendar", &if self.calendar.is_some() { "<Some(TradingCalendar)>" } else { "None" })
+            .finish()
+    }
 }
 
 impl MinuteToDaily {
@@ -225,9 +233,17 @@ impl Resampler for MinuteToDaily {
 }
 
 /// Daily to weekly resampler
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DailyToWeekly {
     calendar: Option<Arc<dyn TradingCalendar>>,
+}
+
+impl std::fmt::Debug for DailyToWeekly {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DailyToWeekly")
+            .field("calendar", &if self.calendar.is_some() { "<Some(TradingCalendar)>" } else { "None" })
+            .finish()
+    }
 }
 
 impl DailyToWeekly {
@@ -304,8 +320,8 @@ impl Resampler for DailyToWeekly {
     fn resample(
         &self,
         data: &[Bar],
-        from_freq: DataFrequency,
-        to_freq: DataFrequency,
+        _from_freq: DataFrequency,
+        _to_freq: DataFrequency,
     ) -> Result<Vec<Bar>> {
         if data.is_empty() {
             return Ok(Vec::new());
@@ -327,9 +343,17 @@ impl Resampler for DailyToWeekly {
 }
 
 /// Daily to monthly resampler
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DailyToMonthly {
     calendar: Option<Arc<dyn TradingCalendar>>,
+}
+
+impl std::fmt::Debug for DailyToMonthly {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DailyToMonthly")
+            .field("calendar", &if self.calendar.is_some() { "<Some(TradingCalendar)>" } else { "None" })
+            .finish()
+    }
 }
 
 impl DailyToMonthly {
@@ -406,8 +430,8 @@ impl Resampler for DailyToMonthly {
     fn resample(
         &self,
         data: &[Bar],
-        from_freq: DataFrequency,
-        to_freq: DataFrequency,
+        _from_freq: DataFrequency,
+        _to_freq: DataFrequency,
     ) -> Result<Vec<Bar>> {
         if data.is_empty() {
             return Ok(Vec::new());
@@ -429,9 +453,17 @@ impl Resampler for DailyToMonthly {
 }
 
 /// Generic resampler with flexible configuration
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GenericResampler {
     calendar: Option<Arc<dyn TradingCalendar>>,
+}
+
+impl std::fmt::Debug for GenericResampler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GenericResampler")
+            .field("calendar", &if self.calendar.is_some() { "<Some(TradingCalendar)>" } else { "None" })
+            .finish()
+    }
 }
 
 impl GenericResampler {

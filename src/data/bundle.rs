@@ -1,12 +1,11 @@
 //! Data bundle system for ingesting historical data from CSV files
 
-use crate::asset::{Asset, AssetType};
+use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};
-use crate::types::{Bar, Price, Timestamp, Volume};
-use chrono::{DateTime, NaiveDate, Utc};
+use crate::types::Bar;
+use chrono::NaiveDate;
 use csv::ReaderBuilder;
 use hashbrown::HashMap;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Bundle metadata and data holder
@@ -336,8 +335,8 @@ impl CSVBundleReader {
                 let id = self.next_asset_id;
                 self.next_asset_id += 1;
 
-                // Create and register asset
-                let asset = Asset::equity(id, symbol.clone(), "CSV".to_string());
+                // Create and register asset (use the date from the first data point as start_date)
+                let asset = Asset::equity(id, symbol.clone(), "CSV".to_string(), date);
                 bundle.add_asset(symbol.clone(), asset);
 
                 id
@@ -556,7 +555,8 @@ mod tests {
     fn test_bundle_finalization() {
         let mut bundle = BundleData::new();
 
-        let asset = Asset::equity(1, "TEST".to_string(), "TEST".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "TEST".to_string(), start_date);
         bundle.add_asset("TEST".to_string(), asset);
 
         let bar1 = Bar {

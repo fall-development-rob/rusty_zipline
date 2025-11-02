@@ -5,7 +5,6 @@
 use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
@@ -255,7 +254,7 @@ impl IntersectionDomain {
         domains: Vec<Arc<dyn Domain>>,
     ) -> Result<Self> {
         if domains.is_empty() {
-            return Err(ZiplineError::InvalidConfiguration(
+            return Err(ZiplineError::ConfigError(
                 "IntersectionDomain requires at least one domain".to_string(),
             ));
         }
@@ -323,7 +322,7 @@ impl UnionDomain {
         domains: Vec<Arc<dyn Domain>>,
     ) -> Result<Self> {
         if domains.is_empty() {
-            return Err(ZiplineError::InvalidConfiguration(
+            return Err(ZiplineError::ConfigError(
                 "UnionDomain requires at least one domain".to_string(),
             ));
         }

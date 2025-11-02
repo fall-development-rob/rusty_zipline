@@ -1,6 +1,6 @@
 //! Scheduling and event system for time-based strategy callbacks
 
-use chrono::{DateTime, Datelike, NaiveTime, Timelike, Utc, Weekday};
+use chrono::{DateTime, Datelike, NaiveTime, Utc, Weekday};
 use std::fmt;
 
 /// Trait for determining when an event should fire

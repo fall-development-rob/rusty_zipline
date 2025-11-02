@@ -1,7 +1,17 @@
-//! Returns factors - price-based return calculations
+//! Returns and risk-based factors
 //!
-//! This module provides various return calculation factors for pipeline analysis
+//! This module contains factors for returns and risk metrics:
+//! - Returns: Percentage returns
+//! - DailyReturns: Single-period returns
+//! - LogReturns: Logarithmic returns
+//! - CumulativeReturns: Compound returns
+//! - PercentChange: Percentage change
+//! - MaxDrawdown: Maximum peak-to-trough decline (CRITICAL for risk management)
 
+use crate::error::Result;
+use crate::pipeline::engine::{Factor, FactorOutput, PipelineContext};
+use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use std::collections::VecDeque;
 
 /// Returns - Simple percentage returns
@@ -204,6 +214,135 @@ impl Default for CumulativeReturns {
     }
 }
 
+/// Maximum Drawdown - CRITICAL for risk management
+///
+/// Calculates maximum drawdown over a rolling window.
+/// Maximum drawdown is the largest peak-to-trough decline in price.
+///
+/// Essential for risk management and position sizing.
+/// Typical usage: filter out stocks with > 30% drawdown (too risky)
+///
+/// # Example
+/// ```rust,no_run
+/// use rusty_zipline::pipeline::MaxDrawdown;
+///
+/// // Filter out stocks with > 30% drawdown (too risky)
+/// let mdd = MaxDrawdown::new(252);  // 1 year
+/// // Use with pipeline filtering to exclude high-risk assets
+/// ```
+#[derive(Debug, Clone)]
+pub struct MaxDrawdown {
+    /// Number of trading days to look back
+    window: usize,
+    /// Rolling buffer of prices
+    prices: VecDeque<f64>,
+}
+
+impl MaxDrawdown {
+    /// Create new MaxDrawdown factor
+    ///
+    /// # Arguments
+    /// * `window` - Number of days to look back (typically 252 for 1 year)
+    ///
+    /// # Panics
+    /// Panics if window is 0
+    pub fn new(window: usize) -> Self {
+        assert!(window > 0, "Window must be positive");
+        Self {
+            window,
+            prices: VecDeque::with_capacity(window),
+        }
+    }
+
+    /// Calculate max drawdown for a single price series
+    ///
+    /// # Arguments
+    /// * `prices` - Slice of historical prices
+    ///
+    /// # Returns
+    /// Maximum drawdown as a decimal (0.30 = 30% drawdown)
+    pub fn calculate_max_dd(prices: &[f64]) -> f64 {
+        if prices.is_empty() {
+            return f64::NAN;
+        }
+
+        let mut max_price = prices[0];
+        let mut max_dd = 0.0;
+
+        for &price in prices {
+            if price > max_price {
+                max_price = price;
+            }
+
+            let drawdown = (max_price - price) / max_price;
+            if drawdown > max_dd {
+                max_dd = drawdown;
+            }
+        }
+
+        max_dd
+    }
+
+    /// Update with new price and compute current max drawdown
+    ///
+    /// # Returns
+    /// Some(max_drawdown) if window is full, None otherwise
+    pub fn update(&mut self, price: f64) -> Option<f64> {
+        self.prices.push_back(price);
+
+        if self.prices.len() > self.window {
+            self.prices.pop_front();
+        }
+
+        if self.prices.len() == self.window {
+            let prices_vec: Vec<f64> = self.prices.iter().copied().collect();
+            Some(Self::calculate_max_dd(&prices_vec))
+        } else {
+            None
+        }
+    }
+
+    /// Get the window length
+    pub fn window_length(&self) -> usize {
+        self.window
+    }
+}
+
+impl Factor for MaxDrawdown {
+    fn compute(&self, _timestamp: DateTime<Utc>, context: &PipelineContext) -> Result<FactorOutput> {
+        let mut output = HashMap::new();
+
+        for asset in context.assets() {
+            // Get historical close prices
+            let closes = context
+                .data_provider()
+                .get_prices(asset.id, self.window)?;
+
+            // Calculate max drawdown
+            let max_dd = if closes.len() >= self.window {
+                Self::calculate_max_dd(&closes[closes.len() - self.window..])
+            } else if !closes.is_empty() {
+                // Use available data if we don't have full window
+                Self::calculate_max_dd(&closes)
+            } else {
+                f64::NAN
+            };
+
+            output.insert(asset.id, max_dd);
+        }
+
+        Ok(output)
+    }
+
+    fn name(&self) -> &str {
+        "MaxDrawdown"
+    }
+
+    fn clone_box(&self) -> Box<dyn Factor> {
+        Box::new(self.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,5 +409,86 @@ mod tests {
 
         let r = cum.update(0.05);
         assert_relative_eq!(r, 0.05, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_max_drawdown() {
+        let mut mdd = MaxDrawdown::new(5);
+
+        // Price series with clear drawdown:
+        // Prices: [100, 110, 90, 80, 85]
+        // Peak: 110, trough: 80
+        // Drawdown: (110 - 80) / 110 = 27.27%
+        let prices = vec![100.0, 110.0, 90.0, 80.0, 85.0];
+
+        let mut result = None;
+        for price in prices {
+            result = mdd.update(price);
+        }
+
+        assert!(result.is_some());
+        let dd = result.unwrap();
+        assert_relative_eq!(dd, 0.2727, epsilon = 0.01); // ~27.27% drawdown
+    }
+
+    #[test]
+    fn test_max_drawdown_no_decline() {
+        let mut mdd = MaxDrawdown::new(5);
+
+        // Monotonically increasing - no drawdown
+        let prices = vec![100.0, 101.0, 102.0, 103.0, 104.0];
+
+        let mut result = None;
+        for price in prices {
+            result = mdd.update(price);
+        }
+
+        assert!(result.is_some());
+        let dd = result.unwrap();
+        assert!(dd < 0.01); // Minimal drawdown
+    }
+
+    #[test]
+    fn test_max_drawdown_calculate() {
+        // Test static calculation method
+        let prices = vec![100.0, 120.0, 110.0, 90.0, 95.0];
+        let dd = MaxDrawdown::calculate_max_dd(&prices);
+
+        // Peak: 120, trough: 90
+        // Drawdown: (120 - 90) / 120 = 25%
+        assert_relative_eq!(dd, 0.25, epsilon = 0.01);
+    }
+
+    #[test]
+    fn test_max_drawdown_empty() {
+        let prices: Vec<f64> = vec![];
+        let dd = MaxDrawdown::calculate_max_dd(&prices);
+        assert!(dd.is_nan());
+    }
+
+    #[test]
+    fn test_max_drawdown_single_price() {
+        let prices = vec![100.0];
+        let dd = MaxDrawdown::calculate_max_dd(&prices);
+        assert_relative_eq!(dd, 0.0, epsilon = 1e-10); // No drawdown with single price
+    }
+
+    #[test]
+    fn test_max_drawdown_recovery() {
+        // Test that recovery doesn't reduce max drawdown
+        let prices = vec![100.0, 120.0, 80.0, 110.0, 115.0];
+        let dd = MaxDrawdown::calculate_max_dd(&prices);
+
+        // Peak: 120, trough: 80, then recovers
+        // Max drawdown should still be (120 - 80) / 120 = 33.33%
+        assert_relative_eq!(dd, 0.3333, epsilon = 0.01);
+    }
+
+    #[test]
+    fn test_max_drawdown_pipeline_integration() {
+        // This test verifies the factor interface
+        let mdd = MaxDrawdown::new(252);
+        assert_eq!(mdd.window_length(), 252);
+        assert_eq!(mdd.name(), "MaxDrawdown");
     }
 }

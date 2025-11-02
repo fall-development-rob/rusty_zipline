@@ -3,7 +3,7 @@
 use crate::asset::Asset;
 use crate::order::{Order, OrderSide};
 use crate::types::{Cash, Price, Quantity, Timestamp};
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// A position in a single asset
@@ -196,10 +196,12 @@ mod tests {
     use super::*;
     use crate::asset::Asset;
     use chrono::Utc;
+use chrono::NaiveDate;
 
     #[test]
     fn test_position_calculations() {
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let mut position = Position::new(asset, 100.0, 10000.0, 100.0);
 
         assert_eq!(position.market_value(), 10000.0);
@@ -215,7 +217,8 @@ mod tests {
     #[test]
     fn test_portfolio_execution() {
         let mut portfolio = Portfolio::new(100000.0);
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let mut order = Order::market(asset.clone(), OrderSide::Buy, 100.0, Utc::now());
         order.fill(100.0, Utc::now());
 
@@ -232,7 +235,8 @@ mod tests {
     #[test]
     fn test_portfolio_value_update() {
         let mut portfolio = Portfolio::new(100000.0);
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let mut order = Order::market(asset.clone(), OrderSide::Buy, 100.0, Utc::now());
         order.fill(100.0, Utc::now());
 

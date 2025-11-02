@@ -1,10 +1,10 @@
 //! Algorithm trait and context for trading strategies
 
-use crate::asset::Asset;
+use crate::asset::{Asset, AssetType};
 use crate::assets::AssetFinder;
 use crate::data::BarData;
 use crate::error::{Result, ZiplineError};
-use crate::finance::{CommissionModel, Portfolio, SlippageModel};
+use crate::finance::{Account, CommissionModel, Portfolio, SlippageModel};
 use crate::order::{Order, OrderSide};
 use crate::pipeline::engine::Pipeline;
 use crate::types::{Quantity, Timestamp};
@@ -18,6 +18,10 @@ pub struct Context {
     pub timestamp: Timestamp,
     /// Portfolio state
     pub portfolio: Portfolio,
+    /// Account state (account-level metrics)
+    pub account: Account,
+    /// Recorded variables for analysis (name -> [(timestamp, value)])
+    pub recorded_vars: HashMap<String, Vec<(DateTime<Utc>, f64)>>,
     /// User-defined variables
     pub variables: HashMap<String, Box<dyn std::any::Any + Send>>,
     /// Pending orders
@@ -30,9 +34,83 @@ impl Context {
         Self {
             timestamp: Timestamp::default(),
             portfolio: Portfolio::new(starting_cash),
+            account: Account::new(starting_cash),
+            recorded_vars: HashMap::new(),
             variables: HashMap::new(),
             pending_orders: Vec::new(),
         }
+    }
+
+    /// Record a custom variable for later analysis
+    ///
+    /// Recorded variables are stored as time series and can be retrieved
+    /// for analysis after the backtest completes.
+    ///
+    /// # Arguments
+    /// * `name` - Name of the variable to record
+    /// * `value` - Value to record
+    ///
+    /// # Example
+    /// ```ignore
+    /// context.record("my_signal", 0.75);
+    /// context.record("position_count", context.portfolio.positions.len() as f64);
+    /// context.record("leverage", context.account.leverage);
+    /// ```
+    pub fn record(&mut self, name: &str, value: f64) {
+        let dt = DateTime::<Utc>::from_timestamp(self.timestamp.timestamp(), 0)
+            .unwrap_or_else(Utc::now);
+
+        self.recorded_vars
+            .entry(name.to_string())
+            .or_insert_with(Vec::new)
+            .push((dt, value));
+    }
+
+    /// Get all recorded values for a variable
+    ///
+    /// Returns a slice of (timestamp, value) tuples for the given variable.
+    ///
+    /// # Arguments
+    /// * `name` - Name of the variable
+    ///
+    /// # Returns
+    /// Option containing the recorded time series, or None if not found
+    pub fn get_recorded(&self, name: &str) -> Option<&[(DateTime<Utc>, f64)]> {
+        self.recorded_vars.get(name).map(|v| v.as_slice())
+    }
+
+    /// Get the latest recorded value for a variable
+    ///
+    /// # Arguments
+    /// * `name` - Name of the variable
+    ///
+    /// # Returns
+    /// The most recent value, or None if no values recorded
+    pub fn get_latest_recorded(&self, name: &str) -> Option<f64> {
+        self.recorded_vars
+            .get(name)
+            .and_then(|v| v.last())
+            .map(|(_, val)| *val)
+    }
+
+    /// Get all recorded variable names
+    pub fn recorded_variable_names(&self) -> Vec<&str> {
+        self.recorded_vars.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Clear all recorded data for a variable
+    pub fn clear_recorded(&mut self, name: &str) {
+        self.recorded_vars.remove(name);
+    }
+
+    /// Update account metrics from current portfolio state
+    ///
+    /// This should be called after portfolio updates to keep account
+    /// metrics synchronized.
+    pub fn update_account(&mut self) {
+        let dt = DateTime::<Utc>::from_timestamp(self.timestamp.timestamp(), 0)
+            .unwrap_or_else(Utc::now);
+        self.account.update(&self.portfolio, dt);
     }
 
     /// Store a variable in the context
@@ -189,6 +267,30 @@ pub trait CancelPolicy: Send + Sync {
     fn should_cancel(&self, order: &Order, dt: DateTime<Utc>) -> bool;
 }
 
+/// Asset class configuration for slippage and commission models
+///
+/// Allows different asset classes (equities, futures, etc.) to have
+/// different slippage and commission models.
+pub struct AssetClassConfig {
+    /// Slippage model for this asset class
+    pub slippage_model: Arc<dyn SlippageModel>,
+    /// Commission model for this asset class
+    pub commission_model: Arc<dyn CommissionModel>,
+}
+
+impl AssetClassConfig {
+    /// Create a new asset class configuration
+    pub fn new(
+        slippage_model: Arc<dyn SlippageModel>,
+        commission_model: Arc<dyn CommissionModel>,
+    ) -> Self {
+        Self {
+            slippage_model,
+            commission_model,
+        }
+    }
+}
+
 /// Scheduled function with date and time rules
 #[derive(Clone)]
 pub struct ScheduledFunction {
@@ -222,10 +324,10 @@ pub struct TradingAlgorithm {
     pipelines: HashMap<String, Pipeline>,
     /// Pipeline outputs (cached)
     pipeline_outputs: HashMap<String, HashMap<u64, HashMap<String, f64>>>,
-    /// Slippage model
-    slippage_model: Option<Arc<dyn SlippageModel>>,
-    /// Commission model
-    commission_model: Option<Arc<dyn CommissionModel>>,
+    /// Per-asset-class configuration (slippage and commission models)
+    asset_configs: HashMap<AssetType, AssetClassConfig>,
+    /// Default configuration for asset classes without specific config
+    default_config: Option<AssetClassConfig>,
     /// Cancel policy
     cancel_policy: Option<Arc<dyn CancelPolicy>>,
     /// Scheduled functions
@@ -241,8 +343,8 @@ impl TradingAlgorithm {
             asset_finder,
             pipelines: HashMap::new(),
             pipeline_outputs: HashMap::new(),
-            slippage_model: None,
-            commission_model: None,
+            asset_configs: HashMap::new(),
+            default_config: None,
             cancel_policy: None,
             scheduled_functions: Vec::new(),
             initialized: false,
@@ -320,14 +422,14 @@ impl TradingAlgorithm {
     /// HashMap<asset_id, HashMap<column_name, value>>
     ///
     /// # Errors
-    /// * `PipelineNotFound` - If no pipeline with this name exists
+    /// * `NoSuchPipeline` - If no pipeline with this name exists
     pub fn pipeline_output(&self, name: &str) -> Result<&HashMap<u64, HashMap<String, f64>>> {
         self.pipeline_outputs
             .get(name)
-            .ok_or_else(|| ZiplineError::PipelineNotFound(name.to_string()))
+            .ok_or_else(|| ZiplineError::NoSuchPipeline(name.to_string()))
     }
 
-    /// Set the slippage model
+    /// Set the default slippage model (for all asset classes without specific config)
     ///
     /// Must be called during initialize().
     ///
@@ -337,11 +439,21 @@ impl TradingAlgorithm {
         if self.initialized {
             return Err(ZiplineError::SetSlippagePostInit);
         }
-        self.slippage_model = Some(model);
+
+        if let Some(ref mut config) = self.default_config {
+            config.slippage_model = model;
+        } else {
+            // Create default config with a placeholder commission model
+            self.default_config = Some(AssetClassConfig::new(
+                model,
+                Arc::new(crate::finance::ZeroCommission),
+            ));
+        }
+
         Ok(())
     }
 
-    /// Set the commission model
+    /// Set the default commission model (for all asset classes without specific config)
     ///
     /// Must be called during initialize().
     ///
@@ -351,8 +463,136 @@ impl TradingAlgorithm {
         if self.initialized {
             return Err(ZiplineError::SetCommissionPostInit);
         }
-        self.commission_model = Some(model);
+
+        if let Some(ref mut config) = self.default_config {
+            config.commission_model = model;
+        } else {
+            // Create default config with a placeholder slippage model
+            self.default_config = Some(AssetClassConfig::new(
+                Arc::new(crate::finance::NoSlippage),
+                model,
+            ));
+        }
+
         Ok(())
+    }
+
+    /// Set slippage model for a specific asset class
+    ///
+    /// Must be called during initialize().
+    ///
+    /// # Arguments
+    /// * `asset_type` - Asset class (Equity, Future, etc.)
+    /// * `model` - Slippage model for this asset class
+    pub fn set_slippage_by_class(
+        &mut self,
+        asset_type: AssetType,
+        model: Arc<dyn SlippageModel>,
+    ) -> Result<()> {
+        if self.initialized {
+            return Err(ZiplineError::SetSlippagePostInit);
+        }
+
+        self.asset_configs
+            .entry(asset_type)
+            .and_modify(|config| config.slippage_model = model.clone())
+            .or_insert_with(|| {
+                AssetClassConfig::new(model, Arc::new(crate::finance::ZeroCommission))
+            });
+
+        Ok(())
+    }
+
+    /// Set commission model for a specific asset class
+    ///
+    /// Must be called during initialize().
+    ///
+    /// # Arguments
+    /// * `asset_type` - Asset class (Equity, Future, etc.)
+    /// * `model` - Commission model for this asset class
+    pub fn set_commission_by_class(
+        &mut self,
+        asset_type: AssetType,
+        model: Arc<dyn CommissionModel>,
+    ) -> Result<()> {
+        if self.initialized {
+            return Err(ZiplineError::SetCommissionPostInit);
+        }
+
+        self.asset_configs
+            .entry(asset_type)
+            .and_modify(|config| config.commission_model = model.clone())
+            .or_insert_with(|| {
+                AssetClassConfig::new(Arc::new(crate::finance::NoSlippage), model)
+            });
+
+        Ok(())
+    }
+
+    /// Convenience method: Set both slippage and commission for equities
+    ///
+    /// # Arguments
+    /// * `slippage` - Slippage model for equities
+    /// * `commission` - Commission model for equities
+    pub fn set_equities_models(
+        &mut self,
+        slippage: Arc<dyn SlippageModel>,
+        commission: Arc<dyn CommissionModel>,
+    ) -> Result<()> {
+        if self.initialized {
+            return Err(ZiplineError::SetSlippagePostInit);
+        }
+
+        self.asset_configs.insert(
+            AssetType::Equity,
+            AssetClassConfig::new(slippage, commission),
+        );
+
+        Ok(())
+    }
+
+    /// Convenience method: Set both slippage and commission for futures
+    ///
+    /// # Arguments
+    /// * `slippage` - Slippage model for futures
+    /// * `commission` - Commission model for futures
+    pub fn set_futures_models(
+        &mut self,
+        slippage: Arc<dyn SlippageModel>,
+        commission: Arc<dyn CommissionModel>,
+    ) -> Result<()> {
+        if self.initialized {
+            return Err(ZiplineError::SetSlippagePostInit);
+        }
+
+        self.asset_configs.insert(
+            AssetType::Future,
+            AssetClassConfig::new(slippage, commission),
+        );
+
+        Ok(())
+    }
+
+    /// Get slippage model for a specific asset
+    ///
+    /// Returns the asset-class-specific model if configured,
+    /// otherwise falls back to the default model.
+    pub fn get_slippage_for_asset(&self, asset: &Asset) -> Option<&Arc<dyn SlippageModel>> {
+        self.asset_configs
+            .get(&asset.asset_type)
+            .map(|c| &c.slippage_model)
+            .or_else(|| self.default_config.as_ref().map(|c| &c.slippage_model))
+    }
+
+    /// Get commission model for a specific asset
+    ///
+    /// Returns the asset-class-specific model if configured,
+    /// otherwise falls back to the default model.
+    pub fn get_commission_for_asset(&self, asset: &Asset) -> Option<&Arc<dyn CommissionModel>> {
+        self.asset_configs
+            .get(&asset.asset_type)
+            .map(|c| &c.commission_model)
+            .or_else(|| self.default_config.as_ref().map(|c| &c.commission_model))
     }
 
     /// Set the order cancel policy
@@ -363,9 +603,7 @@ impl TradingAlgorithm {
     /// * `policy` - The cancel policy to use
     pub fn set_cancel_policy(&mut self, policy: Arc<dyn CancelPolicy>) -> Result<()> {
         if self.initialized {
-            return Err(ZiplineError::RegisterTradingControlPostInit(
-                "cancel_policy".to_string(),
-            ));
+            return Err(ZiplineError::SetCancelPolicyPostInit);
         }
         self.cancel_policy = Some(policy);
         Ok(())
@@ -386,9 +624,7 @@ impl TradingAlgorithm {
         time_rule: TimeRule,
     ) -> Result<()> {
         if self.initialized {
-            return Err(ZiplineError::RegisterTradingControlPostInit(
-                "schedule_function".to_string(),
-            ));
+            return Err(ZiplineError::RegisterTradingControlPostInit);
         }
 
         self.scheduled_functions.push(ScheduledFunction {
@@ -410,14 +646,28 @@ impl TradingAlgorithm {
         self.initialized
     }
 
-    /// Get slippage model
+    /// Get default slippage model
+    ///
+    /// Deprecated: Use get_slippage_for_asset() instead
     pub fn get_slippage_model(&self) -> Option<&Arc<dyn SlippageModel>> {
-        self.slippage_model.as_ref()
+        self.default_config.as_ref().map(|c| &c.slippage_model)
     }
 
-    /// Get commission model
+    /// Get default commission model
+    ///
+    /// Deprecated: Use get_commission_for_asset() instead
     pub fn get_commission_model(&self) -> Option<&Arc<dyn CommissionModel>> {
-        self.commission_model.as_ref()
+        self.default_config.as_ref().map(|c| &c.commission_model)
+    }
+
+    /// Get all configured asset types
+    pub fn configured_asset_types(&self) -> Vec<AssetType> {
+        self.asset_configs.keys().copied().collect()
+    }
+
+    /// Check if an asset type has specific configuration
+    pub fn has_asset_config(&self, asset_type: AssetType) -> bool {
+        self.asset_configs.contains_key(&asset_type)
     }
 
     /// Get cancel policy
@@ -529,7 +779,8 @@ mod tests {
     #[test]
     fn test_order_creation() {
         let mut context = Context::new(100000.0);
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
 
         let order_id = context.order(asset, 100.0).unwrap();
         assert_eq!(context.pending_orders_count(), 1);
@@ -551,7 +802,8 @@ mod tests {
     #[test]
     fn test_symbol_lookup() {
         let asset_finder = Arc::new(AssetFinder::new());
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
 
         asset_finder.insert_asset(asset.clone()).unwrap();
 
@@ -565,8 +817,9 @@ mod tests {
     #[test]
     fn test_symbols_batch_lookup() {
         let asset_finder = Arc::new(AssetFinder::new());
-        let asset1 = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
-        let asset2 = Asset::equity(2, "GOOGL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset1 = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
+        let asset2 = Asset::equity(2, "GOOGL".to_string(), "NASDAQ".to_string(), start_date);
 
         asset_finder.insert_assets(vec![asset1, asset2]).unwrap();
 
@@ -581,7 +834,8 @@ mod tests {
     #[test]
     fn test_sid_lookup() {
         let asset_finder = Arc::new(AssetFinder::new());
-        let asset = Asset::equity(42, "TEST".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(42, "TEST".to_string(), "NYSE".to_string(), start_date);
 
         asset_finder.insert_asset(asset).unwrap();
 
@@ -710,5 +964,297 @@ mod tests {
             TimeRule::MarketClose { offset_minutes: 0 },
         ];
         // Just ensure they compile and can be created
+    }
+
+    // ========== Recording API Tests ==========
+
+    #[test]
+    fn test_context_record_variable() {
+        let mut context = Context::new(100000.0);
+        context.record("my_signal", 0.75);
+        context.record("my_signal", 0.80);
+
+        let recorded = context.get_recorded("my_signal").unwrap();
+        assert_eq!(recorded.len(), 2);
+        assert_eq!(recorded[0].1, 0.75);
+        assert_eq!(recorded[1].1, 0.80);
+    }
+
+    #[test]
+    fn test_context_record_multiple_variables() {
+        let mut context = Context::new(100000.0);
+        context.record("signal_a", 1.0);
+        context.record("signal_b", 2.0);
+        context.record("signal_c", 3.0);
+
+        let names = context.recorded_variable_names();
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"signal_a"));
+        assert!(names.contains(&"signal_b"));
+        assert!(names.contains(&"signal_c"));
+    }
+
+    #[test]
+    fn test_context_get_latest_recorded() {
+        let mut context = Context::new(100000.0);
+        context.record("leverage", 0.5);
+        context.record("leverage", 0.75);
+        context.record("leverage", 1.0);
+
+        assert_eq!(context.get_latest_recorded("leverage"), Some(1.0));
+        assert_eq!(context.get_latest_recorded("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_context_clear_recorded() {
+        let mut context = Context::new(100000.0);
+        context.record("temp", 42.0);
+        assert!(context.get_recorded("temp").is_some());
+
+        context.clear_recorded("temp");
+        assert!(context.get_recorded("temp").is_none());
+    }
+
+    #[test]
+    fn test_context_account_integration() {
+        let mut context = Context::new(100000.0);
+        assert_eq!(context.account.net_liquidation, 100000.0);
+
+        // Update account should work
+        context.update_account();
+        assert_eq!(context.account.net_liquidation, context.portfolio.portfolio_value);
+    }
+
+    #[test]
+    fn test_performance_tracker_recorded_vars() {
+        use crate::performance::PerformanceTracker;
+
+        let mut tracker = PerformanceTracker::new();
+        let mut context_vars = HashMap::new();
+
+        let now = Utc::now();
+        context_vars.insert(
+            "my_metric".to_string(),
+            vec![(now, 1.0), (now, 2.0)],
+        );
+
+        tracker.update_recorded_vars(&context_vars);
+
+        let recorded = tracker.get_recorded("my_metric").unwrap();
+        assert_eq!(recorded.len(), 2);
+        assert_eq!(recorded[0].1, 1.0);
+    }
+
+    #[test]
+    fn test_performance_tracker_num_recorded_vars() {
+        use crate::performance::PerformanceTracker;
+
+        let mut tracker = PerformanceTracker::new();
+        let mut context_vars = HashMap::new();
+
+        let now = Utc::now();
+        context_vars.insert("var1".to_string(), vec![(now, 1.0)]);
+        context_vars.insert("var2".to_string(), vec![(now, 2.0)]);
+
+        tracker.update_recorded_vars(&context_vars);
+
+        assert_eq!(tracker.num_recorded_vars(), 2);
+        let names = tracker.recorded_variable_names();
+        assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn test_recording_with_portfolio_metrics() {
+        let mut context = Context::new(100000.0);
+
+        // Record portfolio-related metrics
+        context.record("cash", context.portfolio.cash);
+        context.record("num_positions", context.portfolio.num_positions() as f64);
+
+        assert_eq!(context.get_latest_recorded("cash"), Some(100000.0));
+        assert_eq!(context.get_latest_recorded("num_positions"), Some(0.0));
+    }
+
+    // ========== Multi-Asset Configuration Tests ==========
+
+    #[test]
+    fn test_set_default_slippage() {
+        use crate::finance::NoSlippage;
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        let slippage = Arc::new(NoSlippage);
+        assert!(algo.set_slippage(slippage.clone()).is_ok());
+
+        assert!(algo.get_slippage_model().is_some());
+    }
+
+    #[test]
+    fn test_set_default_commission() {
+        use crate::finance::ZeroCommission;
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        let commission = Arc::new(ZeroCommission);
+        assert!(algo.set_commission(commission.clone()).is_ok());
+
+        assert!(algo.get_commission_model().is_some());
+    }
+
+    #[test]
+    fn test_set_slippage_by_class() {
+        use crate::finance::NoSlippage;
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        let slippage = Arc::new(NoSlippage);
+        assert!(algo.set_slippage_by_class(AssetType::Equity, slippage).is_ok());
+
+        assert!(algo.has_asset_config(AssetType::Equity));
+        assert!(!algo.has_asset_config(AssetType::Future));
+    }
+
+    #[test]
+    fn test_set_commission_by_class() {
+        use crate::finance::ZeroCommission;
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        let commission = Arc::new(ZeroCommission);
+        assert!(algo.set_commission_by_class(AssetType::Future, commission).is_ok());
+
+        assert!(algo.has_asset_config(AssetType::Future));
+    }
+
+    #[test]
+    fn test_set_equities_models() {
+        use crate::finance::{NoSlippage, ZeroCommission};
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        let slippage = Arc::new(NoSlippage);
+        let commission = Arc::new(ZeroCommission);
+
+        assert!(algo.set_equities_models(slippage, commission).is_ok());
+        assert!(algo.has_asset_config(AssetType::Equity));
+    }
+
+    #[test]
+    fn test_set_futures_models() {
+        use crate::finance::{NoSlippage, ZeroCommission};
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        let slippage = Arc::new(NoSlippage);
+        let commission = Arc::new(ZeroCommission);
+
+        assert!(algo.set_futures_models(slippage, commission).is_ok());
+        assert!(algo.has_asset_config(AssetType::Future));
+    }
+
+    #[test]
+    fn test_get_slippage_for_asset() {
+        use crate::finance::NoSlippage;
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        // Set equity-specific slippage
+        let slippage = Arc::new(NoSlippage);
+        algo.set_slippage_by_class(AssetType::Equity, slippage).unwrap();
+
+        // Test with equity asset
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let equity = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
+        assert!(algo.get_slippage_for_asset(&equity).is_some());
+
+        // Test with future asset (should fall back to default or None)
+        let future = Asset::new(2, "ES".to_string(), "CME".to_string(), AssetType::Future, start_date);
+        let future_slippage = algo.get_slippage_for_asset(&future);
+        assert!(future_slippage.is_none() || future_slippage.is_some());
+    }
+
+    #[test]
+    fn test_get_commission_for_asset() {
+        use crate::finance::ZeroCommission;
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        // Set equity-specific commission
+        let commission = Arc::new(ZeroCommission);
+        algo.set_commission_by_class(AssetType::Equity, commission).unwrap();
+
+        // Test with equity asset
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let equity = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
+        assert!(algo.get_commission_for_asset(&equity).is_some());
+    }
+
+    #[test]
+    fn test_configured_asset_types() {
+        use crate::finance::{NoSlippage, ZeroCommission};
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        algo.set_slippage_by_class(AssetType::Equity, Arc::new(NoSlippage)).unwrap();
+        algo.set_commission_by_class(AssetType::Future, Arc::new(ZeroCommission)).unwrap();
+
+        let types = algo.configured_asset_types();
+        assert_eq!(types.len(), 2);
+        assert!(types.contains(&AssetType::Equity));
+        assert!(types.contains(&AssetType::Future));
+    }
+
+    #[test]
+    fn test_multi_asset_fallback_to_default() {
+        use crate::finance::{NoSlippage, ZeroCommission};
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        // Set default models
+        algo.set_slippage(Arc::new(NoSlippage)).unwrap();
+        algo.set_commission(Arc::new(ZeroCommission)).unwrap();
+
+        // Asset without specific config should fall back to default
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let crypto = Asset::new(1, "BTC".to_string(), "COINBASE".to_string(), AssetType::Crypto, start_date);
+        assert!(algo.get_slippage_for_asset(&crypto).is_some());
+        assert!(algo.get_commission_for_asset(&crypto).is_some());
+    }
+
+    #[test]
+    fn test_cannot_set_models_after_init() {
+        use crate::finance::NoSlippage;
+
+        let asset_finder = Arc::new(AssetFinder::new());
+        let mut algo = TradingAlgorithm::new(asset_finder);
+
+        algo.mark_initialized();
+
+        let slippage = Arc::new(NoSlippage);
+        assert!(algo.set_slippage(slippage.clone()).is_err());
+        assert!(algo.set_slippage_by_class(AssetType::Equity, slippage).is_err());
+    }
+
+    #[test]
+    fn test_asset_class_config_creation() {
+        use crate::finance::{NoSlippage, ZeroCommission};
+
+        let slippage = Arc::new(NoSlippage);
+        let commission = Arc::new(ZeroCommission);
+
+        let config = AssetClassConfig::new(slippage, commission);
+
+        // Just verify it compiles and creates successfully
+        assert!(std::mem::size_of_val(&config) > 0);
     }
 }

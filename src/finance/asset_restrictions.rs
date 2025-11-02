@@ -5,7 +5,7 @@
 
 use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};
-use chrono::{DateTime, Utc};
+use chrono::{NaiveDate, DateTime, Utc};
 use std::collections::HashSet;
 
 /// Restriction reason enumeration
@@ -112,10 +112,9 @@ impl StaticRestrictions {
 impl Restrictions for StaticRestrictions {
     fn is_restricted(&self, asset: &Asset, _dt: DateTime<Utc>) -> Result<()> {
         if self.restricted_sids.contains(&asset.id) {
-            return Err(ZiplineError::RestrictedAsset {
-                asset_id: asset.id,
-                reason: self.reason.as_str().to_string(),
-            });
+            return Err(ZiplineError::RestrictedAsset(
+                format!("Asset {} restricted: {}", asset.id, self.reason.as_str())
+            ));
         }
         Ok(())
     }
@@ -156,22 +155,26 @@ impl Default for HistoricalRestrictions {
 impl Restrictions for HistoricalRestrictions {
     fn is_restricted(&self, asset: &Asset, dt: DateTime<Utc>) -> Result<()> {
         // Check if asset exists yet
-        if dt < asset.start_date {
-            return Err(ZiplineError::TradingBeforeStart {
-                asset_id: asset.id,
-                attempted: dt,
-                start_date: asset.start_date,
-            });
+        let asset_start = asset.start_date.and_hms_opt(0, 0, 0).unwrap();
+        let asset_start_dt = DateTime::<Utc>::from_naive_utc_and_offset(asset_start, Utc);
+
+        if dt < asset_start_dt {
+            return Err(ZiplineError::TradingBeforeStart(
+                format!("Asset {} trading before start: attempted {}, start date {}",
+                    asset.id, dt, asset.start_date)
+            ));
         }
 
         // Check if asset has been delisted
         if !self.allow_delisted {
             if let Some(end_date) = asset.end_date {
-                if dt >= end_date {
-                    return Err(ZiplineError::RestrictedAsset {
-                        asset_id: asset.id,
-                        reason: "delisted".to_string(),
-                    });
+                let asset_end = end_date.and_hms_opt(0, 0, 0).unwrap();
+                let asset_end_dt = DateTime::<Utc>::from_naive_utc_and_offset(asset_end, Utc);
+
+                if dt >= asset_end_dt {
+                    return Err(ZiplineError::RestrictedAsset(
+                        format!("Asset {} delisted at {}", asset.id, end_date)
+                    ));
                 }
             }
         }
@@ -236,19 +239,17 @@ impl Restrictions for SecurityListRestrictions {
     fn is_restricted(&self, asset: &Asset, _dt: DateTime<Utc>) -> Result<()> {
         // Check deny list first
         if self.deny_list.contains(&asset.id) {
-            return Err(ZiplineError::RestrictedAsset {
-                asset_id: asset.id,
-                reason: "deny_list".to_string(),
-            });
+            return Err(ZiplineError::RestrictedAsset(
+                format!("Asset {} on deny list", asset.id)
+            ));
         }
 
         // Check allow list if present
         if let Some(ref allow_list) = self.allow_list {
             if !allow_list.contains(&asset.id) {
-                return Err(ZiplineError::RestrictedAsset {
-                    asset_id: asset.id,
-                    reason: "not_in_allow_list".to_string(),
-                });
+                return Err(ZiplineError::RestrictedAsset(
+                    format!("Asset {} not in allow list", asset.id)
+                ));
             }
         }
 
@@ -312,7 +313,8 @@ mod tests {
     #[test]
     fn test_no_restrictions() {
         let restrictions = NoRestrictions;
-        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string(), start_date);
 
         assert!(restrictions.is_restricted(&asset, Utc::now()).is_ok());
         assert_eq!(restrictions.name(), "NoRestrictions");
@@ -323,8 +325,10 @@ mod tests {
         let mut restrictions =
             StaticRestrictions::from_sids(vec![1, 2, 3], RestrictionReason::RestrictedList);
 
-        let restricted_asset = Asset::equity(1, "BAD".to_string(), "NYSE".to_string());
-        let allowed_asset = Asset::equity(100, "GOOD".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let restricted_asset = Asset::equity(1, "BAD".to_string(), "NYSE".to_string(), start_date);
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let allowed_asset = Asset::equity(100, "GOOD".to_string(), "NYSE".to_string(), start_date);
 
         assert!(restrictions
             .is_restricted(&restricted_asset, Utc::now())
@@ -350,8 +354,9 @@ mod tests {
     fn test_historical_restrictions() {
         let restrictions = HistoricalRestrictions::new();
 
-        let mut asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string());
-        asset.start_date = Utc::now();
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let mut asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string(), start_date);
+        asset.start_date = start_date;
 
         let before_start = asset.start_date - chrono::Duration::days(1);
         let after_start = asset.start_date + chrono::Duration::days(1);
@@ -366,9 +371,12 @@ mod tests {
             .with_allow_list(vec![1, 2, 3])
             .with_deny_list(vec![2]);
 
-        let allowed = Asset::equity(1, "ALLOWED".to_string(), "NYSE".to_string());
-        let denied = Asset::equity(2, "DENIED".to_string(), "NYSE".to_string());
-        let not_in_list = Asset::equity(100, "OTHER".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let allowed = Asset::equity(1, "ALLOWED".to_string(), "NYSE".to_string(), start_date);
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let denied = Asset::equity(2, "DENIED".to_string(), "NYSE".to_string(), start_date);
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let not_in_list = Asset::equity(100, "OTHER".to_string(), "NYSE".to_string(), start_date);
 
         assert!(restrictions.is_restricted(&allowed, Utc::now()).is_ok());
         assert!(restrictions.is_restricted(&denied, Utc::now()).is_err());
@@ -387,8 +395,10 @@ mod tests {
 
         assert_eq!(composite.count(), 2);
 
-        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string());
-        let restricted = Asset::equity(99, "RESTRICTED".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string(), start_date);
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let restricted = Asset::equity(99, "RESTRICTED".to_string(), "NYSE".to_string(), start_date);
 
         assert!(composite.is_restricted(&asset, Utc::now()).is_ok());
         assert!(composite.is_restricted(&restricted, Utc::now()).is_err());

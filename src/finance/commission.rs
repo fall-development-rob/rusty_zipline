@@ -1,7 +1,6 @@
 //! Commission models for calculating trading costs
 
-use crate::asset::Asset;
-use crate::order::{Order, OrderSide};
+use crate::order::Order;
 use crate::types::Cash;
 
 /// Commission model trait
@@ -176,9 +175,11 @@ mod tests {
     use super::*;
     use crate::asset::{Asset, AssetType};
     use chrono::Utc;
+use chrono::NaiveDate;
 
     fn create_test_order(quantity: f64) -> Order {
-        let asset = Asset::equity(1, "TEST".to_string(), "TEST".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "TEST".to_string(), start_date);
         Order::market(asset, OrderSide::Buy, quantity, Utc::now())
     }
 

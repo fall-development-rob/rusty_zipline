@@ -1,10 +1,8 @@
 //! Minute-resolution bar data storage and retrieval
 
-use crate::asset::Asset;
-use crate::data::frequency::DataFrequency;
 use crate::error::{Result, ZiplineError};
 use crate::types::Bar;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use hashbrown::HashMap;
 use std::sync::Arc;
 

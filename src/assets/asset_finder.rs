@@ -55,10 +55,18 @@ impl AssetFinder {
 
     /// Insert an asset into the finder
     pub fn insert_asset(&self, asset: Asset) -> Result<()> {
-        let sid = asset.sid;
+        self.insert_asset_with_dates(asset, Utc::now(), None)
+    }
+
+    /// Insert an asset with specific start and end dates for symbol tracking
+    pub fn insert_asset_with_dates(
+        &self,
+        asset: Asset,
+        start_date: DateTime<Utc>,
+        end_date: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        let sid = asset.id;
         let symbol = asset.symbol.clone();
-        let start_date = asset.start_date;
-        let end_date = asset.end_date;
 
         // Insert into assets map
         self.assets.write().unwrap().insert(sid, asset);
@@ -237,15 +245,13 @@ impl Default for AssetFinder {
 mod tests {
     use super::*;
 
-    fn create_test_asset(sid: u64, symbol: &str, start: DateTime<Utc>) -> Asset {
+    fn create_test_asset(sid: u64, symbol: &str, _start: DateTime<Utc>) -> Asset {
         Asset {
-            sid,
+            id: sid,
             symbol: symbol.to_string(),
             asset_type: AssetType::Equity,
             exchange: "NYSE".to_string(),
-            start_date: start,
-            end_date: None,
-            auto_close_date: None,
+            name: None,
         }
     }
 
@@ -264,7 +270,7 @@ mod tests {
 
         let retrieved = finder.retrieve_asset(1).unwrap();
         assert_eq!(retrieved.symbol, "AAPL");
-        assert_eq!(retrieved.sid, 1);
+        assert_eq!(retrieved.id, 1);
     }
 
     #[test]
@@ -275,11 +281,11 @@ mod tests {
         finder.insert_asset(asset).unwrap();
 
         let found = finder.lookup_symbol("AAPL", None).unwrap();
-        assert_eq!(found.sid, 1);
+        assert_eq!(found.id, 1);
 
         // Case insensitive
         let found = finder.lookup_symbol("aapl", None).unwrap();
-        assert_eq!(found.sid, 1);
+        assert_eq!(found.id, 1);
     }
 
     #[test]
@@ -334,18 +340,17 @@ mod tests {
         let now = Utc::now();
         let past = now - Duration::days(365);
 
-        // Old symbol mapping
-        let mut old_asset = create_test_asset(1, "FB", past);
-        old_asset.end_date = Some(now - Duration::days(30));
-        finder.insert_asset(old_asset).unwrap();
+        // Old symbol mapping (FB expired 30 days ago)
+        let old_asset = create_test_asset(1, "FB", past);
+        finder.insert_asset_with_dates(old_asset, past, Some(now - Duration::days(30))).unwrap();
 
-        // New symbol mapping
+        // New symbol mapping (META started 29 days ago)
         let new_asset = create_test_asset(2, "META", now - Duration::days(29));
-        finder.insert_asset(new_asset).unwrap();
+        finder.insert_asset_with_dates(new_asset, now - Duration::days(29), None).unwrap();
 
         // Lookup in the past should find FB
         let found = finder.lookup_symbol("FB", Some(past + Duration::days(10))).unwrap();
-        assert_eq!(found.sid, 1);
+        assert_eq!(found.id, 1);
 
         // Lookup now should find META (or fail if FB is looked up)
         let result = finder.lookup_symbol("META", None);

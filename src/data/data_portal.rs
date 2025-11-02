@@ -7,7 +7,6 @@ use crate::asset::Asset;
 use crate::data::adjustments::{Adjustment, AdjustmentReader};
 use crate::data::frequency::DataFrequency;
 use crate::error::{Result, ZiplineError};
-use crate::types::Price;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -92,6 +91,18 @@ pub struct DataPortal {
     trading_days: Vec<DateTime<Utc>>,
 }
 
+impl std::fmt::Debug for DataPortal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DataPortal")
+            .field("daily_reader", &if self.daily_reader.is_some() { "<Some(BarReader)>" } else { "None" })
+            .field("minute_reader", &if self.minute_reader.is_some() { "<Some(BarReader)>" } else { "None" })
+            .field("adjustment_reader", &if self.adjustment_reader.is_some() { "<Some(AdjustmentReader)>" } else { "None" })
+            .field("default_frequency", &self.default_frequency)
+            .field("trading_days", &format!("{} days", self.trading_days.len()))
+            .finish()
+    }
+}
+
 impl DataPortal {
     /// Create a new DataPortal
     pub fn new(
@@ -126,14 +137,14 @@ impl DataPortal {
 
         // Try minute reader first if available
         if let Some(minute_reader) = &self.minute_reader {
-            if let Ok(Some(value)) = minute_reader.get_value(asset.sid, dt, actual_field) {
+            if let Ok(Some(value)) = minute_reader.get_value(asset.id, dt, actual_field) {
                 return Ok(Some(value));
             }
         }
 
         // Fall back to daily reader
         if let Some(daily_reader) = &self.daily_reader {
-            return daily_reader.get_value(asset.sid, dt, actual_field);
+            return daily_reader.get_value(asset.id, dt, actual_field);
         }
 
         Err(ZiplineError::NoDataAvailable)
@@ -166,7 +177,7 @@ impl DataPortal {
             }
 
             if !asset_data.is_empty() {
-                result.insert(asset.sid, asset_data);
+                result.insert(asset.id, asset_data);
             }
         }
 
@@ -196,13 +207,17 @@ impl DataPortal {
             DataFrequency::Minute => self.minute_reader.as_ref(),
             DataFrequency::Daily => self.daily_reader.as_ref(),
             DataFrequency::Second => {
-                return Err(ZiplineError::InvalidFrequency(
-                    "Second frequency not supported".to_string(),
-                ))
+                return Err(ZiplineError::UnsupportedFrequency {
+                    frequency: "second".to_string(),
+                    supported: vec!["daily".to_string(), "minute".to_string()],
+                })
             }
         };
 
-        let reader = reader.ok_or(ZiplineError::NoDataAvailable)?;
+        let reader = reader.ok_or_else(|| {
+            let asset_ids: Vec<u64> = assets.iter().map(|a| a.id).collect();
+            ZiplineError::PricingDataNotLoaded { assets: asset_ids }
+        })?;
 
         // Calculate start datetime
         let start = self.get_history_start(dt, bar_count, frequency)?;
@@ -213,7 +228,7 @@ impl DataPortal {
 
             for asset in assets {
                 // Get bars for this asset
-                let bars = reader.get_bars(asset.sid, start, dt)?;
+                let bars = reader.get_bars(asset.id, start, dt)?;
 
                 // Extract field values
                 let values: Vec<f64> = bars
@@ -228,12 +243,12 @@ impl DataPortal {
                     })
                     .collect();
 
-                df.data.insert(asset.sid, values);
+                df.data.insert(asset.id, values);
             }
 
             // Use first asset's bar timestamps as index
             if let Some(first_asset) = assets.first() {
-                let bars = reader.get_bars(first_asset.sid, start, dt)?;
+                let bars = reader.get_bars(first_asset.id, start, dt)?;
                 // Timestamps would come from bars - simplified here
                 df.index = vec![dt; bars.len()];
             }
@@ -277,14 +292,14 @@ impl DataPortal {
     ) -> Result<Option<DateTime<Utc>>> {
         // Try minute reader first
         if let Some(minute_reader) = &self.minute_reader {
-            if let Ok(last_dt) = minute_reader.get_last_traded_dt(asset.sid, dt) {
+            if let Ok(last_dt) = minute_reader.get_last_traded_dt(asset.id, dt) {
                 return Ok(last_dt);
             }
         }
 
         // Fall back to daily reader
         if let Some(daily_reader) = &self.daily_reader {
-            return daily_reader.get_last_traded_dt(asset.sid, dt);
+            return daily_reader.get_last_traded_dt(asset.id, dt);
         }
 
         Ok(None)
@@ -302,8 +317,8 @@ impl DataPortal {
             let mut all_adjustments = Vec::new();
 
             for asset in assets {
-                let adjustments = adjustment_reader.get_adjustments(asset.sid, start, end)?;
-                all_adjustments.extend(adjustments);
+                let adjustments = adjustment_reader.get_adjustments(asset.id, start, end);
+                all_adjustments.extend(adjustments.into_iter().cloned());
             }
 
             Ok(all_adjustments)
@@ -339,6 +354,17 @@ impl DataPortal {
                     .unwrap_or(self.trading_days.len() - 1);
 
                 let start_idx = end_idx.saturating_sub(bar_count);
+
+                // Check if we have enough data
+                if start_idx == 0 && end_idx < bar_count {
+                    let first_available = self.trading_days.first().copied().unwrap_or(end);
+                    return Err(ZiplineError::HistoryWindowBeforeFirstData {
+                        asset: 0, // Generic - specific asset would be passed in real implementation
+                        requested_start: end - chrono::Duration::days(bar_count as i64),
+                        first_available,
+                    });
+                }
+
                 Ok(self.trading_days[start_idx])
             }
             DataFrequency::Minute => {
@@ -347,9 +373,10 @@ impl DataPortal {
                 use chrono::Duration;
                 Ok(end - Duration::minutes(bar_count as i64))
             }
-            DataFrequency::Second => Err(ZiplineError::InvalidFrequency(
-                "Second frequency not supported".to_string(),
-            )),
+            DataFrequency::Second => Err(ZiplineError::UnsupportedFrequency {
+                frequency: "second".to_string(),
+                supported: vec!["daily".to_string(), "minute".to_string()],
+            }),
         }
     }
 }
@@ -414,13 +441,11 @@ mod tests {
 
     fn create_test_asset() -> Asset {
         Asset {
-            sid: 1,
+            id: 1,
             symbol: "AAPL".to_string(),
             asset_type: AssetType::Equity,
             exchange: "NASDAQ".to_string(),
-            start_date: Utc::now(),
-            end_date: None,
-            auto_close_date: None,
+            name: None,
         }
     }
 

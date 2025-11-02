@@ -11,6 +11,7 @@ pub mod frequency;
 pub mod fx; // NEW: P2 - Foreign exchange rates
 pub mod history_loader; // NEW: P1 - Historical window management
 pub mod minute_bars;
+pub mod readers; // NEW: P0 - Bcolz bundle readers (CRITICAL BLOCKER)
 pub mod resample; // NEW: P2 - Data frequency resampling
 pub mod sources; // NEW: P2 - External data source integrations
 
@@ -182,12 +183,13 @@ impl DataSource for InMemoryDataSource {
 mod tests {
     use super::*;
     use crate::asset::Asset;
-    use chrono::Utc;
+    use chrono::{NaiveDate, Utc};
 
     #[test]
     fn test_bar_data() {
         let mut bar_data = BarData::new(100);
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let bar = Bar::new(Utc::now(), 100.0, 105.0, 99.0, 103.0, 1000.0);
 
         bar_data.update(1, bar.clone());
@@ -200,7 +202,8 @@ mod tests {
     #[test]
     fn test_history() {
         let mut bar_data = BarData::new(100);
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
 
         for i in 0..10 {
             let bar = Bar::new(Utc::now(), 100.0 + i as f64, 105.0, 99.0, 103.0, 1000.0);

@@ -3,7 +3,6 @@
 //! A Transaction is created when an Order is filled (executed).
 //! It records the actual price, quantity, and costs of the trade.
 
-use crate::error::Result;
 use crate::order::OrderSide;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

@@ -1,7 +1,18 @@
 //! Volume-based indicators for pipeline analysis
 //!
-//! This module provides volume-related technical indicators
+//! This module provides volume-related technical indicators:
+//! - AverageDollarVolume: Liquidity screening (CRITICAL for production)
+//! - VWAP: Volume-weighted average price
+//! - OnBalanceVolume: Cumulative volume indicator
+//! - ChaikinMoneyFlow: Money flow indicator
+//! - MoneyFlowIndex: Volume-weighted RSI
+//! - AccumulationDistribution: Volume flow indicator
+//! - VolumeWeightedMA: Volume-weighted moving average
 
+use crate::error::Result;
+use crate::pipeline::engine::{Factor, FactorOutput, PipelineContext};
+use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use std::collections::VecDeque;
 
 /// OBV - On-Balance Volume
@@ -254,6 +265,127 @@ impl VolumeWeightedMA {
     }
 }
 
+/// Average Dollar Volume - CRITICAL for liquidity screening
+///
+/// Calculates average dollar volume over a rolling window.
+/// Dollar volume = price * volume
+///
+/// This is the #1 most common liquidity filter in production strategies.
+/// Typical usage: screen for stocks with ADV > $1M to ensure tradability.
+///
+/// # Example
+/// ```rust,no_run
+/// use rusty_zipline::pipeline::AverageDollarVolume;
+///
+/// // Filter for stocks with > $1M average daily dollar volume
+/// let adv = AverageDollarVolume::new(20);
+/// // Use with pipeline filtering
+/// ```
+#[derive(Debug, Clone)]
+pub struct AverageDollarVolume {
+    /// Number of trading days to average over (typically 20-30)
+    window: usize,
+    /// Rolling buffer of dollar volumes
+    dollar_volumes: VecDeque<f64>,
+}
+
+impl AverageDollarVolume {
+    /// Create new AverageDollarVolume factor
+    ///
+    /// # Arguments
+    /// * `window` - Number of days to average (typically 20-30)
+    ///
+    /// # Panics
+    /// Panics if window is 0
+    pub fn new(window: usize) -> Self {
+        assert!(window > 0, "Window must be positive");
+        Self {
+            window,
+            dollar_volumes: VecDeque::with_capacity(window),
+        }
+    }
+
+    /// Update with new price and volume data
+    ///
+    /// # Returns
+    /// Some(average_dollar_volume) if window is full, None otherwise
+    pub fn update(&mut self, close: f64, volume: f64) -> Option<f64> {
+        let dollar_volume = close * volume;
+        self.dollar_volumes.push_back(dollar_volume);
+
+        if self.dollar_volumes.len() > self.window {
+            self.dollar_volumes.pop_front();
+        }
+
+        if self.dollar_volumes.len() == self.window {
+            let sum: f64 = self.dollar_volumes.iter().sum();
+            Some(sum / self.window as f64)
+        } else {
+            None
+        }
+    }
+
+    /// Get the window length
+    pub fn window_length(&self) -> usize {
+        self.window
+    }
+}
+
+impl Factor for AverageDollarVolume {
+    fn compute(&self, _timestamp: DateTime<Utc>, context: &PipelineContext) -> Result<FactorOutput> {
+        let mut output = HashMap::new();
+
+        for asset in context.assets() {
+            // Get historical close prices
+            let closes = context
+                .data_provider()
+                .get_prices(asset.id, self.window)?;
+
+            // Get historical volumes
+            let volumes = context
+                .data_provider()
+                .get_volumes(asset.id, self.window)?;
+
+            // Calculate average dollar volume
+            if closes.len() >= self.window && volumes.len() >= self.window {
+                let dollar_volumes: Vec<f64> = closes
+                    .iter()
+                    .zip(volumes.iter())
+                    .map(|(close, volume)| close * volume)
+                    .collect();
+
+                let avg_dollar_volume: f64 = dollar_volumes.iter().sum::<f64>() / self.window as f64;
+                output.insert(asset.id, avg_dollar_volume);
+            } else if !closes.is_empty() && !volumes.is_empty() {
+                // Use available data if we don't have full window
+                let available_len = closes.len().min(volumes.len());
+                let dollar_volumes: Vec<f64> = closes
+                    .iter()
+                    .take(available_len)
+                    .zip(volumes.iter().take(available_len))
+                    .map(|(close, volume)| close * volume)
+                    .collect();
+
+                let avg_dollar_volume: f64 =
+                    dollar_volumes.iter().sum::<f64>() / available_len as f64;
+                output.insert(asset.id, avg_dollar_volume);
+            } else {
+                output.insert(asset.id, f64::NAN);
+            }
+        }
+
+        Ok(output)
+    }
+
+    fn name(&self) -> &str {
+        "AverageDollarVolume"
+    }
+
+    fn clone_box(&self) -> Box<dyn Factor> {
+        Box::new(self.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,5 +462,44 @@ mod tests {
         assert!(result.is_some());
         // Should weight the 102.0 price more heavily due to higher volume
         assert_relative_eq!(result.unwrap(), 101.5, epsilon = 0.01);
+    }
+
+    #[test]
+    fn test_average_dollar_volume() {
+        let mut adv = AverageDollarVolume::new(5);
+
+        // Test basic computation
+        let closes = vec![100.0, 101.0, 102.0, 103.0, 104.0];
+        let volumes = vec![1000.0, 1100.0, 1200.0, 1300.0, 1400.0];
+
+        let mut results = vec![];
+        for i in 0..5 {
+            if let Some(result) = adv.update(closes[i], volumes[i]) {
+                results.push(result);
+            }
+        }
+
+        assert_eq!(results.len(), 1);
+        // Average dollar volume should be around 116,000
+        assert!(results[0] > 100_000.0 && results[0] < 130_000.0);
+    }
+
+    #[test]
+    fn test_average_dollar_volume_partial_window() {
+        let adv = AverageDollarVolume::new(10);
+
+        // Only provide 3 days - should handle gracefully
+        let mut adv_state = adv.clone();
+        assert_eq!(adv_state.update(100.0, 1000.0), None);
+        assert_eq!(adv_state.update(101.0, 1000.0), None);
+        assert_eq!(adv_state.update(102.0, 1000.0), None);
+    }
+
+    #[test]
+    fn test_average_dollar_volume_pipeline_integration() {
+        // This test will be expanded when we integrate with the pipeline
+        let adv = AverageDollarVolume::new(20);
+        assert_eq!(adv.window_length(), 20);
+        assert_eq!(adv.name(), "AverageDollarVolume");
     }
 }

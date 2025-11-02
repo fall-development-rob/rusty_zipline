@@ -3,9 +3,9 @@
 use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};
 use crate::order::{Order, OrderStatus};
-use crate::types::{Cash, OrderId, Price, Timestamp};
-use chrono::{DateTime, Utc};
-use hashbrown::HashMap;
+use crate::types::{Cash, OrderId, Price};
+use chrono::{NaiveDate, DateTime, Utc};
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// Individual transaction record
@@ -181,10 +181,7 @@ impl Blotter {
             self.cancelled_orders.insert(order_id, order);
             Ok(())
         } else {
-            Err(ZiplineError::InvalidOrder(format!(
-                "Order {} not found or already closed",
-                order_id
-            )))
+            Err(ZiplineError::OrderIdNotFound { order_id })
         }
     }
 
@@ -196,17 +193,14 @@ impl Blotter {
             log::warn!("Order {} rejected: {}", order_id, reason);
             Ok(())
         } else {
-            Err(ZiplineError::InvalidOrder(format!(
-                "Order {} not found",
-                order_id
-            )))
+            Err(ZiplineError::OrderIdNotFound { order_id })
         }
     }
 
     /// Process a fill for an order
     pub fn process_fill(&mut self, order_id: OrderId, fill: Fill) -> Result<Transaction> {
         let order = self.open_orders.get_mut(&order_id).ok_or_else(|| {
-            ZiplineError::InvalidOrder(format!("Order {} not found", order_id))
+            ZiplineError::OrderIdNotFound { order_id }
         })?;
 
         // Update order with fill
@@ -370,11 +364,16 @@ impl Blotter {
     /// Get orders by status
     pub fn get_orders_by_status(&self, status: OrderStatus) -> Vec<&Order> {
         match status {
-            OrderStatus::Open => self.get_open_orders(),
+            OrderStatus::Created | OrderStatus::Submitted | OrderStatus::PartiallyFilled => {
+                // These are all "open" statuses
+                self.open_orders
+                    .values()
+                    .filter(|o| o.status == status)
+                    .collect()
+            }
             OrderStatus::Filled => self.get_filled_orders(),
             OrderStatus::Cancelled => self.get_cancelled_orders(),
             OrderStatus::Rejected => self.rejected_orders.values().collect(),
-            _ => Vec::new(),
         }
     }
 
@@ -464,7 +463,8 @@ mod tests {
 
     #[test]
     fn test_transaction_creation() {
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let dt = Utc::now();
         let order_id = uuid::Uuid::new_v4();
 
@@ -480,7 +480,8 @@ mod tests {
     #[test]
     fn test_transaction_log() {
         let mut log = TransactionLog::new();
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let dt = Utc::now();
 
         let txn1 = Transaction::new(asset.clone(), 100.0, dt, 150.0, uuid::Uuid::new_v4(), 1.0);
@@ -496,7 +497,8 @@ mod tests {
     #[test]
     fn test_blotter_place_order() {
         let mut blotter = Blotter::new();
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
         let order_id = order.id;
 
@@ -509,7 +511,8 @@ mod tests {
     #[test]
     fn test_blotter_fill_order() {
         let mut blotter = Blotter::new();
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
         let order_id = order.id;
 
@@ -527,7 +530,8 @@ mod tests {
     #[test]
     fn test_blotter_cancel_order() {
         let mut blotter = Blotter::new();
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
         let order_id = order.id;
 
@@ -540,7 +544,8 @@ mod tests {
     #[test]
     fn test_blotter_partial_fill() {
         let mut blotter = Blotter::new();
-        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "AAPL".to_string(), "NASDAQ".to_string(), start_date);
         let order = Order::market(asset, OrderSide::Buy, 100.0, Utc::now());
         let order_id = order.id;
 

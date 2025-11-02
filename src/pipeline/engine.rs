@@ -2,10 +2,8 @@
 
 use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};
-use crate::types::Timestamp;
-use chrono::{DateTime, Utc};
+use chrono::{NaiveDate, DateTime, Utc};
 use hashbrown::HashMap;
-use std::any::Any;
 use std::sync::Arc;
 
 /// Factor computation result for a single asset
@@ -256,13 +254,25 @@ impl Pipeline {
     }
 
     /// Get factor by name
-    pub fn get_factor(&self, name: &str) -> Option<&Box<dyn Factor>> {
-        self.factors.get(name)
+    pub fn get_factor(&self, name: &str) -> Result<&Box<dyn Factor>> {
+        self.factors.get(name).ok_or_else(|| {
+            let available: Vec<String> = self.factors.keys().cloned().collect();
+            ZiplineError::TermNotInGraph {
+                term_name: name.to_string(),
+                available_terms: available,
+            }
+        })
     }
 
     /// Get filter by name
-    pub fn get_filter(&self, name: &str) -> Option<&Box<dyn Filter>> {
-        self.filters.get(name)
+    pub fn get_filter(&self, name: &str) -> Result<&Box<dyn Filter>> {
+        self.filters.get(name).ok_or_else(|| {
+            let available: Vec<String> = self.filters.keys().cloned().collect();
+            ZiplineError::TermNotInGraph {
+                term_name: name.to_string(),
+                available_terms: available,
+            }
+        })
     }
 
     /// Get number of factors
@@ -409,7 +419,7 @@ mod tests {
 
         pipeline.add_factor("test".to_string(), factor);
         assert_eq!(pipeline.factor_count(), 1);
-        assert!(pipeline.get_factor("test").is_some());
+        assert!(pipeline.get_factor("test").is_ok());
     }
 
     #[test]
@@ -420,7 +430,8 @@ mod tests {
             value: 42.0,
         });
 
-        let asset = Asset::equity(1, "TEST".to_string(), "TEST".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "TEST".to_string(), start_date);
         pipeline.add_factor("test".to_string(), factor);
         pipeline.set_universe(vec![asset]);
 

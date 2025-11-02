@@ -5,7 +5,7 @@
 use crate::error::{Result, ZiplineError};
 use crate::types::Bar;
 use chrono::{DateTime, Utc};
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;

@@ -4,7 +4,7 @@
 
 use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;

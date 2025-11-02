@@ -3,7 +3,7 @@
 //! Demonstrates how to construct and use continuous futures contracts
 //! for backtesting with realistic E-mini S&P 500 (ES) futures data.
 
-use chrono::{TimeZone, Utc};
+use chrono::{NaiveDate, Datelike, TimeZone, Utc};
 use rusty_zipline::asset::{Asset, AssetType};
 use rusty_zipline::data::bar_reader::{Bar, BarReader, DailyBarReader};
 use rusty_zipline::data::continuous_futures::{
@@ -27,7 +27,8 @@ fn main() -> Result<()> {
     println!("1. Loading futures contract data...");
 
     // ESH3 data (March contract)
-    let esh3_asset = Asset::new(1001, "ESH3".to_string(), "CME".to_string(), AssetType::Future);
+    let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let esh3_asset = Asset::new(1001, "ESH3".to_string(), "CME".to_string(), AssetType::Future, start_date);
     let esh3_bars = create_sample_bars(
         Utc.with_ymd_and_hms(2023, 1, 3, 0, 0, 0).unwrap(),
         Utc.with_ymd_and_hms(2023, 3, 17, 0, 0, 0).unwrap(),
@@ -37,7 +38,8 @@ fn main() -> Result<()> {
     bar_reader.load_from_memory(1001, esh3_bars)?;
 
     // ESM3 data (June contract)
-    let esm3_asset = Asset::new(1002, "ESM3".to_string(), "CME".to_string(), AssetType::Future);
+    let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let esm3_asset = Asset::new(1002, "ESM3".to_string(), "CME".to_string(), AssetType::Future, start_date);
     let esm3_bars = create_sample_bars(
         Utc.with_ymd_and_hms(2023, 1, 3, 0, 0, 0).unwrap(),
         Utc.with_ymd_and_hms(2023, 6, 16, 0, 0, 0).unwrap(),
@@ -47,7 +49,8 @@ fn main() -> Result<()> {
     bar_reader.load_from_memory(1002, esm3_bars)?;
 
     // ESU3 data (September contract)
-    let esu3_asset = Asset::new(1003, "ESU3".to_string(), "CME".to_string(), AssetType::Future);
+    let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let esu3_asset = Asset::new(1003, "ESU3".to_string(), "CME".to_string(), AssetType::Future, start_date);
     let esu3_bars = create_sample_bars(
         Utc.with_ymd_and_hms(2023, 1, 3, 0, 0, 0).unwrap(),
         Utc.with_ymd_and_hms(2023, 9, 15, 0, 0, 0).unwrap(),

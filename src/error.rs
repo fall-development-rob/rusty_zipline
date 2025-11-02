@@ -2,6 +2,7 @@
 //!
 //! Complete error system matching Python Zipline's 81 error classes
 
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 /// Main error type for Zipline-Rust
@@ -48,6 +49,33 @@ pub enum ZiplineError {
     #[error("No data available")]
     NoDataAvailable,
 
+    // P0 Data Availability Errors
+    #[error("History window starts before first available data for asset {asset}: requested {requested_start}, first available: {first_available}")]
+    HistoryWindowBeforeFirstData {
+        asset: u64,
+        requested_start: DateTime<Utc>,
+        first_available: DateTime<Utc>,
+    },
+
+    #[error("Asset {asset} does not exist at {requested_dt}. Asset trading dates: {start_date:?} to {end_date:?}")]
+    AssetNonExistent {
+        asset: u64,
+        requested_dt: DateTime<Utc>,
+        start_date: Option<DateTime<Utc>>,
+        end_date: Option<DateTime<Utc>>,
+    },
+
+    #[error("Pricing data not loaded for assets: {assets:?}. Call load_pricing() before accessing data.")]
+    PricingDataNotLoaded {
+        assets: Vec<u64>,
+    },
+
+    #[error("Cannot request data beyond current simulation time. Current: {current_dt}, requested: {requested_dt}")]
+    NoFurtherData {
+        current_dt: DateTime<Utc>,
+        requested_dt: DateTime<Utc>,
+    },
+
     // ========== Order Errors ==========
     #[error("Invalid order: {0}")]
     InvalidOrder(String),
@@ -63,6 +91,18 @@ pub enum ZiplineError {
 
     #[error("Order in before_trading_start: cannot place orders in before_trading_start()")]
     OrderInBeforeTradingStart,
+
+    // P0 Order Management Errors
+    #[error("Order ID {order_id} not found in order tracker. Order may have been filled or cancelled.")]
+    OrderIdNotFound {
+        order_id: uuid::Uuid,
+    },
+
+    #[error("Cannot place order after session end. Session ended at {session_end}, order attempted at {attempted_at}")]
+    OrderAfterSessionEnd {
+        session_end: DateTime<Utc>,
+        attempted_at: DateTime<Utc>,
+    },
 
     // ========== Transaction Errors ==========
     #[error("Transaction with no volume: order {order_id}")]
@@ -122,6 +162,36 @@ pub enum ZiplineError {
     #[error("Account control violation: {0}")]
     AccountControlViolation(String),
 
+    // P0 Trading Control Errors
+    #[error("Max position size exceeded for asset {asset} ({symbol}): attempted order {attempted_order} shares, max shares: {max_shares:?}, max notional: {max_notional:?}")]
+    MaxPositionSizeExceeded {
+        asset: u64,
+        symbol: String,
+        attempted_order: f64,
+        max_shares: Option<f64>,
+        max_notional: Option<f64>,
+    },
+
+    #[error("Max order count exceeded: {current_count} orders placed, maximum allowed: {max_count}")]
+    MaxOrderCountExceeded {
+        current_count: usize,
+        max_count: usize,
+        date: DateTime<Utc>,
+    },
+
+    #[error("Max order size exceeded for asset {asset}: order size {order_size}, max allowed: {max_size}")]
+    MaxOrderSizeExceeded {
+        asset: u64,
+        order_size: f64,
+        max_size: f64,
+    },
+
+    #[error("Max leverage exceeded: current leverage {current_leverage:.2}x, maximum allowed: {max_leverage:.2}x")]
+    MaxLeverageExceeded {
+        current_leverage: f64,
+        max_leverage: f64,
+    },
+
     // ========== Pipeline Errors ==========
     #[error("Pipeline error: {0}")]
     PipelineError(String),
@@ -135,8 +205,25 @@ pub enum ZiplineError {
     #[error("No such pipeline: {0}")]
     NoSuchPipeline(String),
 
+    #[error("Pipeline not found: {0}")]
+    PipelineNotFound(String),
+
     #[error("Pipeline output during initialize: cannot access pipeline output in initialize()")]
     PipelineOutputDuringInitialize,
+
+    // P0 Pipeline Errors
+    #[error("Pipeline produced unsupported output type for column '{column}': expected {expected}, got {actual}")]
+    UnsupportedPipelineOutput {
+        column: String,
+        expected: String,
+        actual: String,
+    },
+
+    #[error("Term '{term_name}' not found in pipeline execution graph. Available terms: {available_terms:?}")]
+    TermNotInGraph {
+        term_name: String,
+        available_terms: Vec<String>,
+    },
 
     // ========== Configuration Errors ==========
     #[error("Configuration error: {0}")]
@@ -147,6 +234,9 @@ pub enum ZiplineError {
 
     #[error("Set benchmark outside initialize: benchmark must be set in initialize()")]
     SetBenchmarkOutsideInitialize,
+
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
 
     #[error("Schedule function invalid calendar: {0}")]
     ScheduleFunctionInvalidCalendar(String),
@@ -162,9 +252,29 @@ pub enum ZiplineError {
     #[error("Invalid frequency: {0}")]
     InvalidFrequency(String),
 
+    // P0 Configuration Errors
+    #[error("Unsupported data frequency: {frequency}. Supported frequencies: {supported:?}")]
+    UnsupportedFrequency {
+        frequency: String,
+        supported: Vec<String>,
+    },
+
+    #[error("Invalid trading calendar name: '{calendar}'. Available calendars: {available:?}")]
+    InvalidCalendarName {
+        calendar: String,
+        available: Vec<String>,
+    },
+
     // ========== Fund Errors ==========
     #[error("Insufficient funds: required {required}, available {available}")]
     InsufficientFunds { required: f64, available: f64 },
+
+    // P0 Financial Errors
+    #[error("Portfolio value became negative: {portfolio_value:.2}. This indicates a critical error in transaction processing or leverage calculation.")]
+    NegativePortfolioValue {
+        portfolio_value: f64,
+        timestamp: DateTime<Utc>,
+    },
 
     // ========== Execution Errors ==========
     #[error("Execution error: {0}")]
@@ -176,6 +286,9 @@ pub enum ZiplineError {
     // ========== Restriction Errors ==========
     #[error("Asset is restricted: {0}")]
     AssetRestricted(u64),
+
+    #[error("Restricted asset: {0}")]
+    RestrictedAsset(String),
 
     #[error("Asset is frozen: can only close positions for {0}")]
     AssetFrozen(u64),
@@ -223,6 +336,31 @@ pub enum ZiplineError {
 
     #[error("Serialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
+
+    // ========== Data Format Errors ==========
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
+
+    #[error("Data not found: {0}")]
+    DataNotFound(String),
+
+    #[error("Missing data: {0}")]
+    MissingData(String),
+
+    #[error("Index out of bounds: index {0}, length {1}")]
+    IndexOutOfBounds(usize, usize),
+
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
+
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+
+    #[error("Trading before start: {0}")]
+    TradingBeforeStart(String),
+
+    #[error("Unsupported feature: {0}")]
+    UnsupportedFeature(String),
 
     #[error("Unknown error: {0}")]
     Unknown(String),

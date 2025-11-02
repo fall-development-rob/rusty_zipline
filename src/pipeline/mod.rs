@@ -32,7 +32,7 @@ pub use factors::{
 
 // Returns factors
 pub use factors_returns::{
-    CumulativeReturns, DailyReturns, LogReturns, PercentChange, Returns,
+    CumulativeReturns, DailyReturns, LogReturns, MaxDrawdown, PercentChange, Returns,
 };
 
 // Advanced technical indicators
@@ -40,7 +40,8 @@ pub use factors_technical::{Aroon, ADX, CCI, StochasticOscillator, WilliamsR};
 
 // Volume indicators
 pub use factors_volume::{
-    AccumulationDistribution, ChaikinMoneyFlow, MoneyFlowIndex, OnBalanceVolume, VolumeWeightedMA,
+    AccumulationDistribution, AverageDollarVolume, ChaikinMoneyFlow, MoneyFlowIndex,
+    OnBalanceVolume, VolumeWeightedMA,
 };
 
 // Statistical factors

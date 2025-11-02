@@ -1,6 +1,8 @@
 //! Performance analytics and metrics
 
 use crate::types::Timestamp;
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// Performance metrics tracker
@@ -10,6 +12,8 @@ pub struct PerformanceTracker {
     pub values: Vec<(Timestamp, f64)>,
     /// Returns over time
     pub returns: Vec<(Timestamp, f64)>,
+    /// Custom recorded variables (name -> [(timestamp, value)])
+    pub recorded_vars: HashMap<String, Vec<(DateTime<Utc>, f64)>>,
 }
 
 impl PerformanceTracker {
@@ -18,7 +22,45 @@ impl PerformanceTracker {
         Self {
             values: Vec::new(),
             returns: Vec::new(),
+            recorded_vars: HashMap::new(),
         }
+    }
+
+    /// Update recorded variables from context
+    ///
+    /// This merges the recorded variables from an algorithm context into
+    /// the performance tracker for long-term storage.
+    ///
+    /// # Arguments
+    /// * `context_vars` - Recorded variables from algorithm context
+    pub fn update_recorded_vars(&mut self, context_vars: &HashMap<String, Vec<(DateTime<Utc>, f64)>>) {
+        for (name, values) in context_vars {
+            self.recorded_vars
+                .entry(name.clone())
+                .or_insert_with(Vec::new)
+                .extend(values.iter().copied());
+        }
+    }
+
+    /// Get recorded values for a specific variable
+    ///
+    /// # Arguments
+    /// * `name` - Name of the variable
+    ///
+    /// # Returns
+    /// Option containing the time series data
+    pub fn get_recorded(&self, name: &str) -> Option<&[(DateTime<Utc>, f64)]> {
+        self.recorded_vars.get(name).map(|v| v.as_slice())
+    }
+
+    /// Get all recorded variable names
+    pub fn recorded_variable_names(&self) -> Vec<&str> {
+        self.recorded_vars.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Get the number of recorded variables
+    pub fn num_recorded_vars(&self) -> usize {
+        self.recorded_vars.len()
     }
 
     /// Record a performance data point
@@ -49,7 +91,7 @@ impl PerformanceTracker {
         let total_return = self.total_return();
         let years = days / 365.25;
 
-        ((1.0 + total_return).powf(1.0 / years) - 1.0)
+        (1.0 + total_return).powf(1.0 / years) - 1.0
     }
 
     /// Calculate Sharpe ratio (simplified, assuming risk-free rate = 0)

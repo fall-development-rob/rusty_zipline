@@ -6,7 +6,6 @@
 use crate::error::{Result, ZiplineError};
 use crate::finance::Portfolio;
 use crate::order::Order;
-use std::collections::HashMap;
 
 /// Trading control trait - validates orders before execution
 pub trait TradingControl: Send + Sync {
@@ -65,10 +64,11 @@ impl TradingControl for MaxPositionSize {
         if let Some(max_shares) = self.max_shares {
             if new_position.abs() > max_shares {
                 return Err(ZiplineError::MaxPositionSizeExceeded {
-                    asset_id: order.asset.id,
-                    current: current_position,
-                    attempted: new_position,
-                    limit: max_shares,
+                    asset: order.asset.id,
+                    symbol: order.asset.symbol.clone(),
+                    attempted_order: order.quantity,
+                    max_shares: Some(max_shares),
+                    max_notional: None,
                 });
             }
         }
@@ -78,10 +78,11 @@ impl TradingControl for MaxPositionSize {
             let estimated_value = new_position.abs() * order.limit_price.unwrap_or(0.0);
             if estimated_value > max_value {
                 return Err(ZiplineError::MaxPositionSizeExceeded {
-                    asset_id: order.asset.id,
-                    current: current_position,
-                    attempted: new_position,
-                    limit: max_value,
+                    asset: order.asset.id,
+                    symbol: order.asset.symbol.clone(),
+                    attempted_order: order.quantity,
+                    max_shares: None,
+                    max_notional: Some(max_value),
                 });
             }
         }
@@ -110,9 +111,9 @@ impl TradingControl for MaxOrderSize {
     fn validate(&self, order: &Order, _portfolio: &Portfolio) -> Result<()> {
         if order.quantity.abs() > self.max_shares {
             return Err(ZiplineError::MaxOrderSizeExceeded {
-                asset_id: order.asset.id,
-                attempted: order.quantity,
-                limit: self.max_shares,
+                asset: order.asset.id,
+                order_size: order.quantity,
+                max_size: self.max_shares,
             });
         }
         Ok(())
@@ -136,11 +137,11 @@ impl MaxLeverage {
 
 impl TradingControl for MaxLeverage {
     fn validate(&self, _order: &Order, portfolio: &Portfolio) -> Result<()> {
-        let leverage = portfolio.calculate_leverage();
+        let leverage = portfolio.leverage();
         if leverage > self.max_leverage {
             return Err(ZiplineError::MaxLeverageExceeded {
-                current: leverage,
-                limit: self.max_leverage,
+                current_leverage: leverage,
+                max_leverage: self.max_leverage,
             });
         }
         Ok(())
@@ -157,13 +158,15 @@ mod tests {
     use crate::asset::Asset;
     use crate::order::OrderSide;
     use chrono::Utc;
+use chrono::NaiveDate;
 
     #[test]
     fn test_max_position_size_by_shares() {
         let control = MaxPositionSize::by_shares(1000.0);
         let portfolio = Portfolio::new(100000.0);
 
-        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string(), start_date);
         let order = Order::market(asset, OrderSide::Buy, 500.0, Utc::now());
 
         assert!(control.validate(&order, &portfolio).is_ok());
@@ -174,7 +177,8 @@ mod tests {
         let control = MaxOrderSize::new(100.0);
         let portfolio = Portfolio::new(100000.0);
 
-        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string());
+        let start_date = chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let asset = Asset::equity(1, "TEST".to_string(), "NYSE".to_string(), start_date);
         let small_order = Order::market(asset.clone(), OrderSide::Buy, 50.0, Utc::now());
         let large_order = Order::market(asset, OrderSide::Buy, 150.0, Utc::now());
 
