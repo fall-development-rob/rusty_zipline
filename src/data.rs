@@ -2,12 +2,17 @@
 
 pub mod adjustments;
 pub mod bar_reader; // NEW: P1 - Daily and minute bar readers
+pub mod benchmarks; // NEW: P2 - Benchmark data loading
 pub mod bundle;
+pub mod continuous_futures; // NEW: P2 - Continuous futures with roll logic
 pub mod data_portal; // NEW: Unified data access
 pub mod dispatch_reader;
 pub mod frequency;
+pub mod fx; // NEW: P2 - Foreign exchange rates
 pub mod history_loader; // NEW: P1 - Historical window management
 pub mod minute_bars;
+pub mod resample; // NEW: P2 - Data frequency resampling
+pub mod sources; // NEW: P2 - External data source integrations
 
 use crate::asset::Asset;
 use crate::error::{Result, ZiplineError};

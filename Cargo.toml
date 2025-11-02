@@ -31,8 +31,9 @@ anyhow = "1.0"
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls", "chrono", "uuid"], optional = true }
 rusqlite = { version = "0.31", features = ["bundled", "chrono", "uuid"], optional = true }
 
-# Async runtime (for potential data sources)
+# Async runtime (for data sources)
 tokio = { version = "1.36", features = ["full"], optional = true }
+reqwest = { version = "0.11", features = ["json"], optional = true }
 
 # Numerical computations
 num-traits = "0.2"
@@ -52,7 +53,11 @@ hashbrown = "0.14"
 rayon = "1.8"  # Parallel iterators
 
 # CLI (for bundle management)
-clap = { version = "4.5", features = ["derive"], optional = true }
+clap = { version = "4.5", features = ["derive", "color"], optional = true }
+indicatif = { version = "0.17", optional = true }
+colored = { version = "2.1", optional = true }
+toml = { version = "0.8", optional = true }
+dirs = { version = "5.0", optional = true }
 
 [dev-dependencies]
 proptest = "1.4"
@@ -62,9 +67,9 @@ tempfile = "3.10"
 
 [features]
 default = ["rusqlite"]
-async = ["tokio"]
+async = ["tokio", "reqwest"]
 sqlx-support = ["sqlx", "tokio"]
-cli = ["clap"]
+cli = ["clap", "indicatif", "colored", "toml", "dirs"]
 full = ["async", "sqlx-support", "cli"]
 
 [[bench]]

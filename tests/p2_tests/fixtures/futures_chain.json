@@ -1,0 +1,36 @@
+{
+  "root_symbol": "CL",
+  "description": "Crude Oil Futures",
+  "multiplier": 1000.0,
+  "contracts": [
+    {
+      "symbol": "CLZ24",
+      "expiration": "2024-12-19T00:00:00Z",
+      "month_code": "Z",
+      "year": 2024
+    },
+    {
+      "symbol": "CLF25",
+      "expiration": "2025-01-21T00:00:00Z",
+      "month_code": "F",
+      "year": 2025
+    },
+    {
+      "symbol": "CLG25",
+      "expiration": "2025-02-19T00:00:00Z",
+      "month_code": "G",
+      "year": 2025
+    },
+    {
+      "symbol": "CLH25",
+      "expiration": "2025-03-20T00:00:00Z",
+      "month_code": "H",
+      "year": 2025
+    }
+  ],
+  "roll_config": {
+    "method": "volume",
+    "days_before_expiry": 5,
+    "adjustment": "panama"
+  }
+}

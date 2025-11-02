@@ -45,6 +45,7 @@ pub mod prelude {
     pub use crate::algorithm::{Algorithm, Context};
     pub use crate::asset::{Asset, AssetType};
     pub use crate::data::BarData;
+    pub use crate::data::fx::{Currency, CurrencyPair, FXRateReader, InMemoryFXRateReader};
     pub use crate::engine::SimulationEngine;
     pub use crate::error::{Result, ZiplineError};
     pub use crate::finance::{Portfolio, Position};

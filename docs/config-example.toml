@@ -1,0 +1,45 @@
+# rusty-zipline Configuration File
+#
+# Default location: ~/.rusty-zipline/config.toml
+# Override with: rusty-zipline --config /path/to/config.toml
+
+# Data storage directory
+# Where bundle data is stored
+data_dir = "/home/user/.rusty-zipline/data"
+
+# Cache directory
+# Temporary files and compiled artifacts
+cache_dir = "/home/user/.rusty-zipline/cache"
+
+# Default starting capital for backtests
+# Can be overridden with --capital-base flag
+default_capital = 10000000.0
+
+# Registered data bundles
+# Each bundle has a name, type, and path
+
+[[bundles]]
+name = "quandl"
+bundle_type = "csv"
+path = "/home/user/.rusty-zipline/data/quandl"
+
+[[bundles]]
+name = "yahoo"
+bundle_type = "csv"
+path = "/home/user/.rusty-zipline/data/yahoo"
+
+[[bundles]]
+name = "custom_data"
+bundle_type = "csv"
+path = "/mnt/data/trading/bundles/custom"
+
+# Example with multiple bundles
+[[bundles]]
+name = "crypto"
+bundle_type = "csv"
+path = "/home/user/.rusty-zipline/data/crypto"
+
+[[bundles]]
+name = "forex"
+bundle_type = "csv"
+path = "/home/user/.rusty-zipline/data/forex"

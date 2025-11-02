@@ -1,8 +1,11 @@
 //! Integration tests for zipline-rust
 
+// Include P2 test modules
+mod p2_tests;
+
 use chrono::{Duration, Utc};
 use std::sync::Arc;
-use zipline_rust::{
+use rusty_zipline::{
     algorithm::{Algorithm, BuyAndHold, Context},
     asset::Asset,
     calendar::NYSECalendar,
